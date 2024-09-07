@@ -96,6 +96,11 @@ verus! {
             self.r.value()->n
         }
 
+        pub open spec fn valid(self, id: Loc, frac: int) -> bool
+        {
+            self.inv() && self.id() == id && self.frac() == frac
+        }
+
         pub proof fn default() -> (tracked result: FractionalResource<T, Total>)
         {
             let tracked r = Resource::alloc(Fractional::unit());

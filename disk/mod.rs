@@ -47,9 +47,7 @@ verus! {
             requires
                 old(self).inv(),
                 !old(self).invoked(),
-                r.inv(),
-                r.id() == old(self).id(),
-                r.frac() == 1,
+                r.valid(old(self).id(), 1),
             ensures
                 self.invoked(),
                 self.inv(),
@@ -57,9 +55,7 @@ verus! {
                 self.addr() == old(self).addr(),
                 self.val() == old(self).val(),
                 self.pre() == old(self).pre(),
-                result.id() == self.id(),
-                result.inv(),
-                result.frac() == 1,
+                result.valid(self.id(), 1),
                 result.val() == (MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
@@ -77,18 +73,14 @@ verus! {
             requires
                 old(self).inv(),
                 !old(self).invoked(),
-                r.inv(),
-                r.id() == old(self).id(),
-                r.frac() == 1,
+                r.valid(old(self).id(), 1),
                 r.val().mem == r.val().crash,
             ensures
                 self.invoked(),
                 self.inv(),
                 self.id() == old(self).id(),
                 self.pre() == old(self).pre(),
-                result.id() == self.id(),
-                result.inv(),
-                result.frac() == 1,
+                result.valid(self.id(), 1),
                 result.val() == r.val(),
             opens_invariants
                 [ DISK_INV_NS ];
@@ -123,9 +115,7 @@ verus! {
                 true,
             ensures
                 res.0.inv(),
-                res.0.id() == res.1@.id(),
-                res.1@.inv(),
-                res.1@.frac() == 1,
+                res.1@.valid(res.0.id(), 1),
                 res.1@.val() == (MemCrashView{
                     mem: (0, 0),
                     crash: (0, 0),
@@ -215,9 +205,7 @@ verus! {
         pub fn barrier_owned(&self, Tracked(f): Tracked<&FractionalResource::<MemCrashView, 2>>)
             requires
                 self.inv(),
-                f.inv(),
-                f.frac() == 1,
-                f.id() == self.id(),
+                f.valid(self.id(), 1),
             ensures
                 f.val().crash == f.val().mem,
         {

@@ -121,9 +121,7 @@ verus! {
                 self.invoked(),
                 self.inv(),
             ensures
-                res.inv(),
-                res.frac() == 1,
-                res.id() == self.id(),
+                res.valid(self.id(), 1),
                 res.val().mem == view_write(self.pre().mem, self.addr(), self.val()),
                 ( res.val().crash == self.pre().crash ||
                   res.val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),
@@ -204,9 +202,7 @@ verus! {
                 self.invoked(),
                 self.inv(),
             ensures
-                res.inv(),
-                res.frac() == 1,
-                res.id() == self.id(),
+                res.valid(self.id(), 1),
                 res.val().mem == view_write(self.pre().mem, self.addr(), self.val()),
                 ( res.val().crash == self.pre().crash ||
                   res.val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),

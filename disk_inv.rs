@@ -50,15 +50,9 @@ verus! {
     impl InvariantPredicate<DiskInvParam, DiskInvState> for DiskInvPred
     {
         closed spec fn inv(k: DiskInvParam, v: DiskInvState) -> bool {
-            v.disk.inv() &&
-            v.disk2.inv() &&
-            v.abs.inv() &&
-            v.disk.id() == k.disk_id &&
-            v.disk2.id() == k.disk2_id &&
-            v.abs.id() == k.abs_id &&
-            v.disk.frac() == 1 &&
-            v.disk2.frac() == 1 &&
-            v.abs.frac() == 1 &&
+            v.disk.valid(k.disk_id, 1) &&
+            v.disk2.valid(k.disk2_id, 1) &&
+            v.abs.valid(k.abs_id, 1) &&
             v.disk.val() == v.disk2.val() &&
             abs_inv(v.abs.val().mem, v.disk.val().mem) &&
             abs_inv(v.abs.val().crash, v.disk.val().crash)
@@ -79,16 +73,12 @@ verus! {
     impl DiskWritePermission<(MemCrashView, AbsPair, DiskInvParam)> for InvWritePerm
     {
         closed spec fn inv(&self) -> bool {
-            self.disk2_frac.inv() &&
-            self.disk2_frac.frac() == 1 &&
-            self.disk2_frac.id() == self.inv.constant().disk2_id &&
+            self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.disk2_frac.val().mem == if !self.invoked() { self.pre.0.mem } else { view_write(self.pre.0.mem, self.addr(), self.val()) } &&
             ( self.disk2_frac.val().crash == self.pre.0.crash ||
               ( self.invoked() && self.disk2_frac.val().crash == view_write(self.pre.0.crash, self.addr(), self.val()) ) ) &&
 
-            self.app_frac.inv() &&
-            self.app_frac.frac() == 1 &&
-            self.app_frac.id() == self.inv.constant().abs_id &&
+            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
             self.app_frac.val().mem == if !self.invoked() || self.addr() != 0 { self.pre.1.mem } else { self.val() } &&
             ( self.app_frac.val().crash == self.pre.1.crash ||
               ( self.invoked() && self.addr() == 0 && self.app_frac.val().crash == self.val() ) ) &&
@@ -160,12 +150,8 @@ verus! {
     {
         proof fn alloc(tracked addr: u8, tracked val: u8, tracked inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>, tracked dfrac: FractionalResource<MemCrashView, 2>, tracked afrac: FractionalResource<AbsPair, 2>) -> (tracked res: InvWritePerm)
             requires
-                dfrac.inv(),
-                dfrac.frac() == 1,
-                dfrac.id() == inv.constant().disk2_id,
-                afrac.inv(),
-                afrac.frac() == 1,
-                afrac.id() == inv.constant().abs_id,
+                dfrac.valid(inv.constant().disk2_id, 1),
+                afrac.valid(inv.constant().abs_id, 1),
                 if addr == 0 {
                     val <= dfrac.val().mem.1 && val <= dfrac.val().crash.1
                 } else {
@@ -197,12 +183,8 @@ verus! {
                 self.invoked(),
                 self.inv(),
             ensures
-                res.0.inv(),
-                res.1.inv(),
-                res.0.frac() == 1,
-                res.1.frac() == 1,
-                res.0.id() == self.pre().2.disk2_id,
-                res.1.id() == self.pre().2.abs_id,
+                res.0.valid(self.pre().2.disk2_id, 1),
+                res.1.valid(self.pre().2.abs_id, 1),
                 res.0.val().mem == view_write(self.pre().0.mem, self.addr(), self.val()),
                 ( res.0.val().crash == self.pre().0.crash ||
                   res.0.val().crash == view_write(self.pre().0.crash, self.addr(), self.val()) ),
@@ -226,14 +208,10 @@ verus! {
     impl DiskBarrierPermission<(MemCrashView, AbsPair, DiskInvParam)> for InvBarrierPerm
     {
         closed spec fn inv(&self) -> bool {
-            self.disk2_frac.inv() &&
-            self.disk2_frac.frac() == 1 &&
-            self.disk2_frac.id() == self.inv.constant().disk2_id &&
+            self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.disk2_frac.val() == self.pre.0 &&
 
-            self.app_frac.inv() &&
-            self.app_frac.frac() == 1 &&
-            self.app_frac.id() == self.inv.constant().abs_id &&
+            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
             self.app_frac.val() == self.pre.1 &&
 
             self.inv.namespace() == DISK_INV_NS &&
@@ -278,12 +256,8 @@ verus! {
     {
         proof fn alloc(tracked inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>, tracked dfrac: FractionalResource<MemCrashView, 2>, tracked afrac: FractionalResource<AbsPair, 2>) -> (tracked res: InvBarrierPerm)
             requires
-                dfrac.inv(),
-                dfrac.frac() == 1,
-                dfrac.id() == inv.constant().disk2_id,
-                afrac.inv(),
-                afrac.frac() == 1,
-                afrac.id() == inv.constant().abs_id,
+                dfrac.valid(inv.constant().disk2_id, 1),
+                afrac.valid(inv.constant().abs_id, 1),
                 inv.namespace() == DISK_INV_NS,
             ensures
                 res.inv(),
@@ -306,12 +280,8 @@ verus! {
                 self.invoked(),
                 self.inv(),
             ensures
-                res.0.inv(),
-                res.1.inv(),
-                res.0.frac() == 1,
-                res.1.frac() == 1,
-                res.0.id() == self.pre().2.disk2_id,
-                res.1.id() == self.pre().2.abs_id,
+                res.0.valid(self.pre().2.disk2_id, 1),
+                res.1.valid(self.pre().2.abs_id, 1),
                 res.0.val() == self.pre().0 &&
                 res.0.val().mem == res.0.val().crash &&
                 res.1.val() == self.pre().1 &&
