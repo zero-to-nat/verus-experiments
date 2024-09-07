@@ -73,37 +73,6 @@ verus! {
         }
     }
 
-    impl WriteFupd
-    {
-        proof fn alloc(tracked addr: u8, tracked val: u8, tracked frac: FractionalResource<MemCrashView, 2>, tracked pre: AbsView, tracked post: AbsView) -> (tracked res: WriteFupd)
-            requires
-                frac.inv(),
-                frac.frac() == 1,
-                abs_inv(pre, frac.val().mem),
-                abs_inv(pre, frac.val().crash),
-                if addr == 0 {
-                    val == post && val <= frac.val().mem.1 && val <= frac.val().crash.1
-                } else {
-                    pre == post && val >= pre
-                },
-            ensures
-                res.pre(),
-                res.id() == frac.id(),
-                res.addr() == addr,
-                res.val() == val,
-                res.frac == frac,
-        {
-            let tracked mut f = WriteFupd{
-                a: addr,
-                v: val,
-                frac: frac,
-                abs_pre: pre,
-                abs_post: post,
-            };
-            f
-        }
-    }
-
     pub struct WriteFupd1
     {
         pub v: u8,
@@ -147,31 +116,6 @@ verus! {
         }
     }
 
-    impl WriteFupd1
-    {
-        proof fn alloc(tracked val: u8, tracked frac: FractionalResource<MemCrashView, 2>, tracked abs: AbsView) -> (tracked res: WriteFupd1)
-            requires
-                frac.inv(),
-                frac.frac() == 1,
-                abs_inv(abs, frac.val().mem),
-                abs_inv(abs, frac.val().crash),
-                val >= abs,
-            ensures
-                res.pre(),
-                res.id() == frac.id(),
-                res.addr() == 1,
-                res.val() == val,
-                res.frac == frac,
-        {
-            let tracked mut f = WriteFupd1{
-                v: val,
-                frac: frac,
-                abs: abs,
-            };
-            f
-        }
-    }
-
     fn main()
     {
         let (mut d, Tracked(r)) = Disk::alloc();
@@ -180,7 +124,7 @@ verus! {
         let x1 = d.read(1, Tracked(&mut r));
         assert(x0 == 0 && x1 == 0);
 
-        let tracked fupd = WriteFupd::alloc(1u8, 5u8, r, 0u8, 0u8);
+        let tracked fupd = WriteFupd{ a: 1u8, v: 5u8, frac: r, abs_pre: 0u8, abs_post: 0u8 };
         let Tracked(r) = d.write::<_, WriteFupd>(1, 5, Tracked(fupd));
 
         let x0 = d.read(0, Tracked(&mut r));
@@ -188,7 +132,7 @@ verus! {
         assert(x0 == 0 && x1 == 5);
 
         // As another example, could use a different fupd to justify the write.
-        let tracked fupd = WriteFupd1::alloc(7u8, r, 0u8);
+        let tracked fupd = WriteFupd1{ v: 7u8, frac: r, abs: 0u8 };
         let Tracked(r) = d.write::<_, WriteFupd1>(1, 7, Tracked(fupd));
 
         let x0 = d.read(0, Tracked(&mut r));
@@ -201,7 +145,7 @@ verus! {
         // violates the invariant that block0 <= block1.
         d.barrier_owned(Tracked(&r));
 
-        let tracked fupd = WriteFupd::alloc(0u8, 2u8, r, 0u8, 2u8);
+        let tracked fupd = WriteFupd{ a: 0u8, v: 2u8, frac: r, abs_pre: 0u8, abs_post: 2u8 };
         let Tracked(r) = d.write::<_, WriteFupd>(0, 2, Tracked(fupd));
 
         let x0 = d.read(0, Tracked(&mut r));

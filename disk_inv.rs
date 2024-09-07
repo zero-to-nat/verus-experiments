@@ -145,38 +145,6 @@ verus! {
         }
     }
 
-    impl InvWritePerm
-    {
-        proof fn alloc(tracked addr: u8, tracked val: u8, tracked inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>, tracked dfrac: FractionalResource<MemCrashView, 2>, tracked afrac: FractionalResource<AbsPair, 2>) -> (tracked res: InvWritePerm)
-            requires
-                dfrac.valid(inv.constant().disk2_id, 1),
-                afrac.valid(inv.constant().abs_id, 1),
-                if addr == 0 {
-                    val <= dfrac.val().mem.1 && val <= dfrac.val().crash.1
-                } else {
-                    val >= dfrac.val().mem.0 && val >= dfrac.val().crash.0
-                },
-                inv.namespace() == DISK_INV_NS,
-            ensures
-                res.pre(),
-                res.addr() == addr,
-                res.val() == val,
-                res.constant == inv.constant(),
-                res.disk2_frac == dfrac,
-                res.app_frac == afrac,
-        {
-            let tracked mut f = InvWritePerm{
-                a: addr,
-                v: val,
-                disk2_frac: dfrac,
-                app_frac: afrac,
-                constant: inv.constant(),
-                inv: inv,
-            };
-            f
-        }
-    }
-
     pub struct InvBarrierPerm
     {
         pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
@@ -224,29 +192,6 @@ verus! {
         }
     }
 
-    impl InvBarrierPerm
-    {
-        proof fn alloc(tracked inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>, tracked dfrac: FractionalResource<MemCrashView, 2>, tracked afrac: FractionalResource<AbsPair, 2>) -> (tracked res: InvBarrierPerm)
-            requires
-                dfrac.valid(inv.constant().disk2_id, 1),
-                afrac.valid(inv.constant().abs_id, 1),
-                inv.namespace() == DISK_INV_NS,
-            ensures
-                res.pre(),
-                res.constant == inv.constant(),
-                res.disk2_frac == dfrac,
-                res.app_frac == afrac,
-        {
-            let tracked mut f = InvBarrierPerm{
-                disk2_frac: dfrac,
-                app_frac: afrac,
-                constant: inv.constant(),
-                inv: inv,
-            };
-            f
-        }
-    }
-
     fn main()
     {
         let (mut d, Tracked(r)) = Disk::alloc();
@@ -276,7 +221,7 @@ verus! {
         // let x1 = d.read(1, Tracked(&mut r));
         // assert(x0 == 0 && x1 == 0);
 
-        let tracked fupd = InvWritePerm::alloc(1u8, 5u8, i.clone(), disk_r, app_r);
+        let tracked fupd = InvWritePerm{ a: 1u8, v: 5u8, disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
         let Tracked(res) = d.write::<_, InvWritePerm>(1, 5, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
@@ -288,11 +233,11 @@ verus! {
         // we might end up in a crash state where the first write (above)
         // didn't happen but the second write (below) does happen, and that
         // violates the invariant that block0 <= block1.
-        let tracked fupd = InvBarrierPerm::alloc(i.clone(), disk_r, app_r);
+        let tracked fupd = InvBarrierPerm{ disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
         let Tracked(res) = d.barrier::<_, InvBarrierPerm>(Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
-        let tracked fupd = InvWritePerm::alloc(0u8, 2u8, i.clone(), disk_r, app_r);
+        let tracked fupd = InvWritePerm{ a: 0u8, v: 2u8, disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
         let Tracked(res) = d.write::<_, InvWritePerm>(0, 2, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
