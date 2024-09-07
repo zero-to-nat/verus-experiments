@@ -1,6 +1,5 @@
 use builtin::*;
 use vstd::prelude::*;
-use vstd::modes::*;
 use vstd::invariant::*;
 
 mod disk;
@@ -25,7 +24,7 @@ verus! {
     {
         a: u8,
         v: u8,
-        tracked frac: Option<FractionalResource<MemCrashView, 2>>,
+        tracked frac: FractionalResource<MemCrashView, 2>,
         ghost invoked: bool,
         ghost abs_pre: AbsView,
         ghost abs_post: AbsView,
@@ -35,26 +34,25 @@ verus! {
     impl DiskWritePermission<MemCrashView> for WriteFupd
     {
         closed spec fn inv(&self) -> bool {
-            self.frac.is_Some() &&
-            self.frac.unwrap().inv() &&
-            self.frac.unwrap().frac() == 1 &&
-            self.frac.unwrap().val().mem == if !self.invoked() { self.pre.mem } else { view_write(self.pre.mem, self.addr(), self.val()) } &&
-            ( self.frac.unwrap().val().crash == self.pre.crash ||
-              ( self.invoked() && self.frac.unwrap().val().crash == view_write(self.pre.crash, self.addr(), self.val()) ) ) &&
+            self.frac.inv() &&
+            self.frac.frac() == 1 &&
+            self.frac.val().mem == if !self.invoked() { self.pre.mem } else { view_write(self.pre.mem, self.addr(), self.val()) } &&
+            ( self.frac.val().crash == self.pre.crash ||
+              ( self.invoked() && self.frac.val().crash == view_write(self.pre.crash, self.addr(), self.val()) ) ) &&
             if self.addr() == 0 {
                 self.val() == self.abs_post &&
-                self.val() <= self.frac.unwrap().val().mem.1 &&
-                self.val() <= self.frac.unwrap().val().crash.1
+                self.val() <= self.frac.val().mem.1 &&
+                self.val() <= self.frac.val().crash.1
             } else {
                 self.abs_post == self.abs_pre && self.val() >= self.abs_pre
             } &&
-            abs_inv(if self.invoked() { self.abs_post } else { self.abs_pre }, self.frac.unwrap().val().mem) &&
-            ( abs_inv(self.abs_pre, self.frac.unwrap().val().crash) ||
-              abs_inv(self.abs_post, self.frac.unwrap().val().crash) )
+            abs_inv(if self.invoked() { self.abs_post } else { self.abs_pre }, self.frac.val().mem) &&
+            ( abs_inv(self.abs_pre, self.frac.val().crash) ||
+              abs_inv(self.abs_post, self.frac.val().crash) )
         }
 
         closed spec fn id(&self) -> int {
-            self.frac.unwrap().id()
+            self.frac.id()
         }
 
         closed spec fn addr(&self) -> u8 {
@@ -75,17 +73,13 @@ verus! {
 
         proof fn apply(tracked &mut self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
-            let tracked mut opt_frac = None;
-            tracked_swap(&mut self.frac, &mut opt_frac);
-            let tracked r = r.combine(opt_frac.tracked_unwrap());
-            let tracked r = r.update(MemCrashView{
+            self.invoked = true;
+            self.frac.combine_mut(r);
+            self.frac.update_mut(MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
                 });
-            let tracked (r1, r2) = r.split(1);
-            self.frac = Some(r2);
-            self.invoked = true;
-            r1
+            self.frac.split_mut(1)
         }
     }
 
@@ -113,7 +107,7 @@ verus! {
             let tracked mut f = WriteFupd{
                 a: addr,
                 v: val,
-                frac: Some(frac),
+                frac: frac,
                 invoked: false,
                 abs_pre: pre,
                 abs_post: post,
@@ -122,18 +116,17 @@ verus! {
             f
         }
 
-        proof fn frac(tracked self) -> (tracked res: Option<FractionalResource<MemCrashView, 2>>)
+        proof fn frac(tracked self) -> (tracked res: FractionalResource<MemCrashView, 2>)
             requires
                 self.invoked(),
                 self.inv(),
             ensures
-                res.is_Some(),
-                res.unwrap().inv(),
-                res.unwrap().frac() == 1,
-                res.unwrap().id() == self.id(),
-                res.unwrap().val().mem == view_write(self.pre().mem, self.addr(), self.val()),
-                ( res.unwrap().val().crash == self.pre().crash ||
-                  res.unwrap().val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),
+                res.inv(),
+                res.frac() == 1,
+                res.id() == self.id(),
+                res.val().mem == view_write(self.pre().mem, self.addr(), self.val()),
+                ( res.val().crash == self.pre().crash ||
+                  res.val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),
         {
             self.frac
         }
@@ -142,7 +135,7 @@ verus! {
     pub struct WriteFupd1
     {
         v: u8,
-        tracked frac: Option<FractionalResource<MemCrashView, 2>>,
+        tracked frac: FractionalResource<MemCrashView, 2>,
         ghost invoked: bool,
         ghost abs: AbsView,
         ghost pre: MemCrashView,
@@ -151,18 +144,17 @@ verus! {
     impl DiskWritePermission<MemCrashView> for WriteFupd1
     {
         closed spec fn inv(&self) -> bool {
-            self.frac.is_Some() &&
-            self.frac.unwrap().inv() &&
-            self.frac.unwrap().frac() == 1 &&
-            self.frac.unwrap().val().mem == if !self.invoked() { self.pre.mem } else { view_write(self.pre.mem, self.addr(), self.val()) } &&
-            ( self.frac.unwrap().val().crash == self.pre.crash ||
-              ( self.invoked() && self.frac.unwrap().val().crash == view_write(self.pre.crash, 1, self.val()) ) ) &&
+            self.frac.inv() &&
+            self.frac.frac() == 1 &&
+            self.frac.val().mem == if !self.invoked() { self.pre.mem } else { view_write(self.pre.mem, self.addr(), self.val()) } &&
+            ( self.frac.val().crash == self.pre.crash ||
+              ( self.invoked() && self.frac.val().crash == view_write(self.pre.crash, 1, self.val()) ) ) &&
             self.val() >= self.abs &&
-            abs_inv(self.abs, self.frac.unwrap().val().mem) &&
-            abs_inv(self.abs, self.frac.unwrap().val().crash)
+            abs_inv(self.abs, self.frac.val().mem) &&
+            abs_inv(self.abs, self.frac.val().crash)
         }
 
-        closed spec fn id(&self) -> int { self.frac.unwrap().id() }
+        closed spec fn id(&self) -> int { self.frac.id() }
         closed spec fn addr(&self) -> u8 { 1 }
         closed spec fn val(&self) -> u8 { self.v }
         closed spec fn invoked(&self) -> bool { self.invoked }
@@ -170,17 +162,13 @@ verus! {
 
         proof fn apply(tracked &mut self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
-            let tracked mut opt_frac = None;
-            tracked_swap(&mut self.frac, &mut opt_frac);
-            let tracked r = r.combine(opt_frac.tracked_unwrap());
-            let tracked r = r.update(MemCrashView{
+            self.invoked = true;
+            self.frac.combine_mut(r);
+            self.frac.update_mut(MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
                 });
-            let tracked (r1, r2) = r.split(1);
-            self.frac = Some(r2);
-            self.invoked = true;
-            r1
+            self.frac.split_mut(1)
         }
     }
 
@@ -203,7 +191,7 @@ verus! {
         {
             let tracked mut f = WriteFupd1{
                 v: val,
-                frac: Some(frac),
+                frac: frac,
                 invoked: false,
                 abs: abs,
                 pre: frac.val(),
@@ -211,18 +199,17 @@ verus! {
             f
         }
 
-        proof fn frac(tracked self) -> (tracked res: Option<FractionalResource<MemCrashView, 2>>)
+        proof fn frac(tracked self) -> (tracked res: FractionalResource<MemCrashView, 2>)
             requires
                 self.invoked(),
                 self.inv(),
             ensures
-                res.is_Some(),
-                res.unwrap().inv(),
-                res.unwrap().frac() == 1,
-                res.unwrap().id() == self.id(),
-                res.unwrap().val().mem == view_write(self.pre().mem, self.addr(), self.val()),
-                ( res.unwrap().val().crash == self.pre().crash ||
-                  res.unwrap().val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),
+                res.inv(),
+                res.frac() == 1,
+                res.id() == self.id(),
+                res.val().mem == view_write(self.pre().mem, self.addr(), self.val()),
+                ( res.val().crash == self.pre().crash ||
+                  res.val().crash == view_write(self.pre().crash, self.addr(), self.val()) ),
         {
             self.frac
         }
@@ -238,7 +225,7 @@ verus! {
 
         let tracked fupd = WriteFupd::alloc(1u8, 5u8, r, 0u8, 0u8);
         d.write::<_, WriteFupd>(1, 5, Tracked(&mut fupd));
-        let tracked r = fupd.frac().tracked_unwrap();
+        let tracked r = fupd.frac();
 
         let x0 = d.read(0, Tracked(&mut r));
         let x1 = d.read(1, Tracked(&mut r));
@@ -247,7 +234,7 @@ verus! {
         // As another example, could use a different fupd to justify the write.
         let tracked fupd = WriteFupd1::alloc(7u8, r, 0u8);
         d.write::<_, WriteFupd1>(1, 7, Tracked(&mut fupd));
-        let tracked r = fupd.frac().tracked_unwrap();
+        let tracked r = fupd.frac();
 
         let x0 = d.read(0, Tracked(&mut r));
         let x1 = d.read(1, Tracked(&mut r));
@@ -261,7 +248,7 @@ verus! {
 
         let tracked fupd = WriteFupd::alloc(0u8, 2u8, r, 0u8, 2u8);
         d.write::<_, WriteFupd>(0, 2, Tracked(&mut fupd));
-        let tracked r = fupd.frac().tracked_unwrap();
+        let tracked r = fupd.frac();
 
         let x0 = d.read(0, Tracked(&mut r));
         let x1 = d.read(1, Tracked(&mut r));

@@ -1,6 +1,5 @@
 use builtin::*;
 use vstd::prelude::*;
-use vstd::modes::*;
 use vstd::invariant::*;
 use std::sync::Arc;
 
@@ -31,13 +30,13 @@ verus! {
 
     struct DiskInvState {
         // Actual disk state.
-        disk: Option<FractionalResource<MemCrashView, 2>>,
+        disk: FractionalResource<MemCrashView, 2>,
 
         // Re-exporting disk state for applicaton to track intermediate writes.
-        disk2: Option<FractionalResource<MemCrashView, 2>>,
+        disk2: FractionalResource<MemCrashView, 2>,
 
         // Abstract state (memory and crash).
-        abs: Option<FractionalResource<AbsPair, 2>>,
+        abs: FractionalResource<AbsPair, 2>,
     }
 
     struct DiskInvParam {
@@ -51,21 +50,18 @@ verus! {
     impl InvariantPredicate<DiskInvParam, DiskInvState> for DiskInvPred
     {
         closed spec fn inv(k: DiskInvParam, v: DiskInvState) -> bool {
-            v.disk.is_Some() &&
-            v.disk2.is_Some() &&
-            v.abs.is_Some() &&
-            v.disk.unwrap().inv() &&
-            v.disk2.unwrap().inv() &&
-            v.abs.unwrap().inv() &&
-            v.disk.unwrap().id() == k.disk_id &&
-            v.disk2.unwrap().id() == k.disk2_id &&
-            v.abs.unwrap().id() == k.abs_id &&
-            v.disk.unwrap().frac() == 1 &&
-            v.disk2.unwrap().frac() == 1 &&
-            v.abs.unwrap().frac() == 1 &&
-            v.disk.unwrap().val() == v.disk2.unwrap().val() &&
-            abs_inv(v.abs.unwrap().val().mem, v.disk.unwrap().val().mem) &&
-            abs_inv(v.abs.unwrap().val().crash, v.disk.unwrap().val().crash)
+            v.disk.inv() &&
+            v.disk2.inv() &&
+            v.abs.inv() &&
+            v.disk.id() == k.disk_id &&
+            v.disk2.id() == k.disk2_id &&
+            v.abs.id() == k.abs_id &&
+            v.disk.frac() == 1 &&
+            v.disk2.frac() == 1 &&
+            v.abs.frac() == 1 &&
+            v.disk.val() == v.disk2.val() &&
+            abs_inv(v.abs.val().mem, v.disk.val().mem) &&
+            abs_inv(v.abs.val().crash, v.disk.val().crash)
         }
     }
 
@@ -73,8 +69,8 @@ verus! {
     {
         a: u8,
         v: u8,
-        tracked disk2_frac: Option<FractionalResource<MemCrashView, 2>>,
-        tracked app_frac: Option<FractionalResource<AbsPair, 2>>,
+        tracked disk2_frac: FractionalResource<MemCrashView, 2>,
+        tracked app_frac: FractionalResource<AbsPair, 2>,
         ghost invoked: bool,
         ghost pre: (MemCrashView, AbsPair, DiskInvParam),
         inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
@@ -83,31 +79,29 @@ verus! {
     impl DiskWritePermission<(MemCrashView, AbsPair, DiskInvParam)> for InvWritePerm
     {
         closed spec fn inv(&self) -> bool {
-            self.disk2_frac.is_Some() &&
-            self.disk2_frac.unwrap().inv() &&
-            self.disk2_frac.unwrap().frac() == 1 &&
-            self.disk2_frac.unwrap().id() == self.inv.constant().disk2_id &&
-            self.disk2_frac.unwrap().val().mem == if !self.invoked() { self.pre.0.mem } else { view_write(self.pre.0.mem, self.addr(), self.val()) } &&
-            ( self.disk2_frac.unwrap().val().crash == self.pre.0.crash ||
-              ( self.invoked() && self.disk2_frac.unwrap().val().crash == view_write(self.pre.0.crash, self.addr(), self.val()) ) ) &&
+            self.disk2_frac.inv() &&
+            self.disk2_frac.frac() == 1 &&
+            self.disk2_frac.id() == self.inv.constant().disk2_id &&
+            self.disk2_frac.val().mem == if !self.invoked() { self.pre.0.mem } else { view_write(self.pre.0.mem, self.addr(), self.val()) } &&
+            ( self.disk2_frac.val().crash == self.pre.0.crash ||
+              ( self.invoked() && self.disk2_frac.val().crash == view_write(self.pre.0.crash, self.addr(), self.val()) ) ) &&
 
-            self.app_frac.is_Some() &&
-            self.app_frac.unwrap().inv() &&
-            self.app_frac.unwrap().frac() == 1 &&
-            self.app_frac.unwrap().id() == self.inv.constant().abs_id &&
-            self.app_frac.unwrap().val().mem == if !self.invoked() || self.addr() != 0 { self.pre.1.mem } else { self.val() } &&
-            ( self.app_frac.unwrap().val().crash == self.pre.1.crash ||
-              ( self.invoked() && self.addr() == 0 && self.app_frac.unwrap().val().crash == self.val() ) ) &&
+            self.app_frac.inv() &&
+            self.app_frac.frac() == 1 &&
+            self.app_frac.id() == self.inv.constant().abs_id &&
+            self.app_frac.val().mem == if !self.invoked() || self.addr() != 0 { self.pre.1.mem } else { self.val() } &&
+            ( self.app_frac.val().crash == self.pre.1.crash ||
+              ( self.invoked() && self.addr() == 0 && self.app_frac.val().crash == self.val() ) ) &&
 
             self.inv.namespace() == DISK_INV_NS &&
             self.inv.constant() == self.pre.2 &&
 
             if self.addr() == 0 {
-                self.val() <= self.disk2_frac.unwrap().val().mem.1 &&
-                self.val() <= self.disk2_frac.unwrap().val().crash.1
+                self.val() <= self.disk2_frac.val().mem.1 &&
+                self.val() <= self.disk2_frac.val().crash.1
             } else {
-                self.val() >= self.disk2_frac.unwrap().val().mem.0 &&
-                self.val() >= self.disk2_frac.unwrap().val().crash.0
+                self.val() >= self.disk2_frac.val().mem.0 &&
+                self.val() >= self.disk2_frac.val().crash.0
             }
         }
 
@@ -135,49 +129,30 @@ verus! {
         {
             self.invoked = true;
 
-            let tracked mut r1opt: Option<FractionalResource<MemCrashView, 2>> = None;
+            let tracked mut res: FractionalResource<MemCrashView, 2> = FractionalResource::default();
             open_atomic_invariant!(credit => &self.inv => inner => {
-                let tracked mut opt_frac_disk = None;
-                tracked_swap(&mut inner.disk, &mut opt_frac_disk);
-                let tracked r = r.combine(opt_frac_disk.tracked_unwrap());
-                let tracked r = r.update(MemCrashView{
+                inner.disk.combine_mut(r);
+                inner.disk.update_mut(MemCrashView{
                         mem: view_write(r.val().mem, self.addr(), self.val()),
                         crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
                     });
-                let tracked (r1, r2) = r.split(1);
-                inner.disk = Some(r2);
+                res = inner.disk.split_mut(1);
 
-                let tracked mut opt_frac_disk2 = None;
-                tracked_swap(&mut inner.disk2, &mut opt_frac_disk2);
-                let tracked mut opt_frac_disk2_self = None;
-                tracked_swap(&mut self.disk2_frac, &mut opt_frac_disk2_self);
-                let tracked r2 = opt_frac_disk2.tracked_unwrap();
-                let tracked r2 = r2.combine(opt_frac_disk2_self.tracked_unwrap());
-                let tracked r2 = r2.update(r1.val());
-                let tracked (r21, r22) = r2.split(1);
-                self.disk2_frac = Some(r21);
-                inner.disk2 = Some(r22);
+                self.disk2_frac.combine_mut(inner.disk2);
+                self.disk2_frac.update_mut(inner.disk.val());
+                inner.disk2 = self.disk2_frac.split_mut(1);
 
                 if self.addr() == 0 {
-                    let tracked mut opt_frac_abs = None;
-                    tracked_swap(&mut inner.abs, &mut opt_frac_abs);
-                    let tracked mut opt_frac_abs_self = None;
-                    tracked_swap(&mut self.app_frac, &mut opt_frac_abs_self);
-                    let tracked abs = opt_frac_abs.tracked_unwrap();
-                    let tracked abs = abs.combine(opt_frac_abs_self.tracked_unwrap());
-                    let tracked abs = abs.update(AbsPair{
+                    self.app_frac.combine_mut(inner.abs);
+                    self.app_frac.update_mut(AbsPair{
                         mem: self.val(),
-                        crash: if write_crash { self.val() } else { abs.val().crash },
+                        crash: if write_crash { self.val() } else { self.app_frac.val().crash },
                     });
-                    let tracked (abs1, abs2) = abs.split(1);
-                    self.app_frac = Some(abs1);
-                    inner.abs = Some(abs2)
-                };
-
-                r1opt = Some(r1)
+                    inner.abs = self.app_frac.split_mut(1)
+                }
             });
 
-            r1opt.tracked_unwrap()
+            res
         }
     }
 
@@ -208,8 +183,8 @@ verus! {
             let tracked mut f = InvWritePerm{
                 a: addr,
                 v: val,
-                disk2_frac: Some(dfrac),
-                app_frac: Some(afrac),
+                disk2_frac: dfrac,
+                app_frac: afrac,
                 invoked: false,
                 pre: (dfrac.val(), afrac.val(), inv.constant()),
                 inv: inv,
@@ -217,25 +192,23 @@ verus! {
             f
         }
 
-        proof fn frac(tracked self) -> (tracked res: (Option<FractionalResource<MemCrashView, 2>>, Option<FractionalResource<AbsPair, 2>>))
+        proof fn frac(tracked self) -> (tracked res: (FractionalResource<MemCrashView, 2>, FractionalResource<AbsPair, 2>))
             requires
                 self.invoked(),
                 self.inv(),
             ensures
-                res.0.is_Some(),
-                res.1.is_Some(),
-                res.0.unwrap().inv(),
-                res.1.unwrap().inv(),
-                res.0.unwrap().frac() == 1,
-                res.1.unwrap().frac() == 1,
-                res.0.unwrap().id() == self.pre().2.disk2_id,
-                res.1.unwrap().id() == self.pre().2.abs_id,
-                res.0.unwrap().val().mem == view_write(self.pre().0.mem, self.addr(), self.val()),
-                ( res.0.unwrap().val().crash == self.pre().0.crash ||
-                  res.0.unwrap().val().crash == view_write(self.pre().0.crash, self.addr(), self.val()) ),
-                res.1.unwrap().val().mem == if self.addr() == 0 { self.val() } else { self.pre().1.mem },
-                ( res.1.unwrap().val().crash == self.pre().1.crash ||
-                  ( self.addr() == 0 && res.1.unwrap().val().crash == self.val() ) )
+                res.0.inv(),
+                res.1.inv(),
+                res.0.frac() == 1,
+                res.1.frac() == 1,
+                res.0.id() == self.pre().2.disk2_id,
+                res.1.id() == self.pre().2.abs_id,
+                res.0.val().mem == view_write(self.pre().0.mem, self.addr(), self.val()),
+                ( res.0.val().crash == self.pre().0.crash ||
+                  res.0.val().crash == view_write(self.pre().0.crash, self.addr(), self.val()) ),
+                res.1.val().mem == if self.addr() == 0 { self.val() } else { self.pre().1.mem },
+                ( res.1.val().crash == self.pre().1.crash ||
+                  ( self.addr() == 0 && res.1.val().crash == self.val() ) )
         {
             (self.disk2_frac, self.app_frac)
         }
@@ -243,8 +216,8 @@ verus! {
 
     pub struct InvBarrierPerm
     {
-        tracked disk2_frac: Option<FractionalResource<MemCrashView, 2>>,
-        tracked app_frac: Option<FractionalResource<AbsPair, 2>>,
+        tracked disk2_frac: FractionalResource<MemCrashView, 2>,
+        tracked app_frac: FractionalResource<AbsPair, 2>,
         ghost invoked: bool,
         ghost pre: (MemCrashView, AbsPair, DiskInvParam),
         inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
@@ -253,24 +226,22 @@ verus! {
     impl DiskBarrierPermission<(MemCrashView, AbsPair, DiskInvParam)> for InvBarrierPerm
     {
         closed spec fn inv(&self) -> bool {
-            self.disk2_frac.is_Some() &&
-            self.disk2_frac.unwrap().inv() &&
-            self.disk2_frac.unwrap().frac() == 1 &&
-            self.disk2_frac.unwrap().id() == self.inv.constant().disk2_id &&
-            self.disk2_frac.unwrap().val() == self.pre.0 &&
+            self.disk2_frac.inv() &&
+            self.disk2_frac.frac() == 1 &&
+            self.disk2_frac.id() == self.inv.constant().disk2_id &&
+            self.disk2_frac.val() == self.pre.0 &&
 
-            self.app_frac.is_Some() &&
-            self.app_frac.unwrap().inv() &&
-            self.app_frac.unwrap().frac() == 1 &&
-            self.app_frac.unwrap().id() == self.inv.constant().abs_id &&
-            self.app_frac.unwrap().val() == self.pre.1 &&
+            self.app_frac.inv() &&
+            self.app_frac.frac() == 1 &&
+            self.app_frac.id() == self.inv.constant().abs_id &&
+            self.app_frac.val() == self.pre.1 &&
 
             self.inv.namespace() == DISK_INV_NS &&
             self.inv.constant() == self.pre.2 &&
 
             if self.invoked() {
-                self.disk2_frac.unwrap().val().mem == self.disk2_frac.unwrap().val().crash &&
-                self.app_frac.unwrap().val().mem == self.app_frac.unwrap().val().crash
+                self.disk2_frac.val().mem == self.disk2_frac.val().crash &&
+                self.app_frac.val().mem == self.app_frac.val().crash
             } else {
                 true
             }
@@ -294,31 +265,9 @@ verus! {
 
             let tracked mut r = r;
             open_atomic_invariant!(credit => &self.inv => inner => {
-                let tracked mut opt_frac_disk = None;
-                tracked_swap(&mut inner.disk, &mut opt_frac_disk);
-                let tracked frac_disk = opt_frac_disk.tracked_unwrap();
-                r.agree(&frac_disk);
-                inner.disk = Some(frac_disk);
-
-                let tracked mut opt_frac_disk2 = None;
-                tracked_swap(&mut inner.disk2, &mut opt_frac_disk2);
-                let tracked frac_disk2 = opt_frac_disk2.tracked_unwrap();
-                let tracked mut opt_frac_disk2_self = None;
-                tracked_swap(&mut self.disk2_frac, &mut opt_frac_disk2_self);
-                let tracked mut self_disk2 = opt_frac_disk2_self.tracked_unwrap();
-                self_disk2.agree(&frac_disk2);
-                inner.disk2 = Some(frac_disk2);
-                self.disk2_frac = Some(self_disk2);
-
-                let tracked mut opt_frac_abs = None;
-                tracked_swap(&mut inner.abs, &mut opt_frac_abs);
-                let tracked mut frac_abs = opt_frac_abs.tracked_unwrap();
-                let tracked mut opt_frac_abs_self = None;
-                tracked_swap(&mut self.app_frac, &mut opt_frac_abs_self);
-                let tracked mut self_abs = opt_frac_abs_self.tracked_unwrap();
-                self_abs.agree(&frac_abs);
-                inner.abs = Some(frac_abs);
-                self.app_frac = Some(self_abs)
+                r.agree(&inner.disk);
+                self.disk2_frac.agree(&inner.disk2);
+                self.app_frac.agree(&inner.abs)
             });
 
             r
@@ -343,8 +292,8 @@ verus! {
                 res.pre() == (dfrac.val(), afrac.val(), inv.constant()),
         {
             let tracked mut f = InvBarrierPerm{
-                disk2_frac: Some(dfrac),
-                app_frac: Some(afrac),
+                disk2_frac: dfrac,
+                app_frac: afrac,
                 invoked: false,
                 pre: (dfrac.val(), afrac.val(), inv.constant()),
                 inv: inv,
@@ -352,23 +301,21 @@ verus! {
             f
         }
 
-        proof fn frac(tracked self) -> (tracked res: (Option<FractionalResource<MemCrashView, 2>>, Option<FractionalResource<AbsPair, 2>>))
+        proof fn frac(tracked self) -> (tracked res: (FractionalResource<MemCrashView, 2>, FractionalResource<AbsPair, 2>))
             requires
                 self.invoked(),
                 self.inv(),
             ensures
-                res.0.is_Some(),
-                res.1.is_Some(),
-                res.0.unwrap().inv(),
-                res.1.unwrap().inv(),
-                res.0.unwrap().frac() == 1,
-                res.1.unwrap().frac() == 1,
-                res.0.unwrap().id() == self.pre().2.disk2_id,
-                res.1.unwrap().id() == self.pre().2.abs_id,
-                res.0.unwrap().val() == self.pre().0 &&
-                res.0.unwrap().val().mem == res.0.unwrap().val().crash &&
-                res.1.unwrap().val() == self.pre().1 &&
-                res.1.unwrap().val().mem == res.1.unwrap().val().crash
+                res.0.inv(),
+                res.1.inv(),
+                res.0.frac() == 1,
+                res.1.frac() == 1,
+                res.0.id() == self.pre().2.disk2_id,
+                res.1.id() == self.pre().2.abs_id,
+                res.0.val() == self.pre().0 &&
+                res.0.val().mem == res.0.val().crash &&
+                res.1.val() == self.pre().1 &&
+                res.1.val().mem == res.1.val().crash
         {
             (self.disk2_frac, self.app_frac)
         }
@@ -391,9 +338,9 @@ verus! {
         };
 
         let tracked inv_st = DiskInvState{
-            disk: Some(r),
-            disk2: Some(disk_r1),
-            abs: Some(app_r1),
+            disk: r,
+            disk2: disk_r1,
+            abs: app_r1,
         };
 
         let tracked i = AtomicInvariant::<_, _, DiskInvPred>::new(inv_param, inv_st, disk::DISK_INV_NS as int);
@@ -406,8 +353,6 @@ verus! {
         let tracked fupd = InvWritePerm::alloc(1u8, 5u8, i.clone(), disk_r, app_r);
         d.write::<_, InvWritePerm>(1, 5, Tracked(&mut fupd));
         let tracked (disk_r, app_r) = fupd.frac();
-        let tracked disk_r = disk_r.tracked_unwrap();
-        let tracked app_r = app_r.tracked_unwrap();
 
         // let x0 = d.read(0, Tracked(&mut r));
         // let x1 = d.read(1, Tracked(&mut r));
@@ -420,14 +365,10 @@ verus! {
         let tracked fupd = InvBarrierPerm::alloc(i.clone(), disk_r, app_r);
         d.barrier::<_, InvBarrierPerm>(Tracked(&mut fupd));
         let tracked (disk_r, app_r) = fupd.frac();
-        let tracked disk_r = disk_r.tracked_unwrap();
-        let tracked app_r = app_r.tracked_unwrap();
 
         let tracked fupd = InvWritePerm::alloc(0u8, 2u8, i.clone(), disk_r, app_r);
         d.write::<_, InvWritePerm>(0, 2, Tracked(&mut fupd));
         let tracked (disk_r, app_r) = fupd.frac();
-        let tracked disk_r = disk_r.tracked_unwrap();
-        let tracked app_r = app_r.tracked_unwrap();
 
         // let x0 = d.read(0, Tracked(&mut r));
         // let x1 = d.read(1, Tracked(&mut r));

@@ -1,6 +1,7 @@
 use builtin::*;
 use vstd::pcm::*;
 use vstd::prelude::*;
+use vstd::modes::*;
 
 // This implements a resource for fractional ownership of a ghost variable.
 // The fractions are represented as some number out of a compile-time const
@@ -95,6 +96,12 @@ verus! {
             self.r.value()->n
         }
 
+        pub proof fn default() -> (tracked result: FractionalResource<T, Total>)
+        {
+            let tracked r = Resource::alloc(Fractional::unit());
+            FractionalResource{ r }
+        }
+
         pub proof fn alloc(v: T) -> (tracked result: FractionalResource<T, Total>)
             requires
                 Total > 0,
@@ -120,6 +127,29 @@ verus! {
             self.r.validate_2(&other.r)
         }
 
+        pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: FractionalResource<T, Total>)
+            requires
+                old(self).inv(),
+                0 < n < old(self).frac()
+            ensures
+                result.id() == self.id() == old(self).id(),
+                self.inv(),
+                result.inv(),
+                self.val() == old(self).val(),
+                result.val() == old(self).val(),
+                self.frac() + result.frac() == old(self).frac(),
+                result.frac() == n,
+        {
+            let tracked mut r = Resource::alloc(Fractional::unit());
+            tracked_swap(&mut self.r, &mut r);
+            let tracked (r1, r2) = r.split(Fractional::Value { v: r.value()->v,
+                                                               n: r.value()->n - n },
+                                           Fractional::Value { v: r.value()->v,
+                                                               n: n });
+            self.r = r1;
+            FractionalResource { r: r2 }
+        }
+
         pub proof fn split(tracked self, n: int) ->
             (tracked result: (FractionalResource<T, Total>, FractionalResource<T, Total>))
             requires
@@ -134,11 +164,27 @@ verus! {
                 result.0.frac() + result.1.frac() == self.frac(),
                 result.1.frac() == n,
         {
-            let tracked (r1, r2) = self.r.split(Fractional::Value { v: self.r.value()->v,
-                                                                    n: self.r.value()->n - n },
-                                                Fractional::Value { v: self.r.value()->v,
-                                                                    n: n });
-            (FractionalResource { r: r1 }, FractionalResource { r: r2 })
+            let tracked mut s = self;
+            let tracked r = s.split_mut(n);
+            (s, r)
+        }
+
+        pub proof fn combine_mut(tracked &mut self, tracked other: FractionalResource<T, Total>)
+            requires
+                old(self).inv(),
+                other.inv(),
+                old(self).id() == other.id(),
+            ensures
+                self.id() == old(self).id(),
+                self.inv(),
+                self.val() == old(self).val(),
+                self.val() == other.val(),
+                self.frac() == old(self).frac() + other.frac(),
+        {
+            let tracked mut r = Resource::alloc(Fractional::unit());
+            tracked_swap(&mut self.r, &mut r);
+            r.validate_2(&other.r);
+            self.r = r.join(other.r);
         }
 
         pub proof fn combine(tracked self, tracked other: FractionalResource<T, Total>) -> (tracked result: FractionalResource<T, Total>)
@@ -153,10 +199,25 @@ verus! {
                 result.val() == other.val(),
                 result.frac() == self.frac() + other.frac(),
         {
-            let tracked mut mself = self;
-            mself.r.validate_2(&other.r);
-            let tracked r = mself.r.join(other.r);
-            FractionalResource { r: r }
+            let tracked mut s = self;
+            s.combine_mut(other);
+            s
+        }
+
+        pub proof fn update_mut(tracked &mut self, v: T)
+            requires
+                old(self).inv(),
+                old(self).frac() == Total,
+            ensures
+                self.id() == old(self).id(),
+                self.inv(),
+                self.val() == v,
+                self.frac() == old(self).frac(),
+        {
+            let tracked mut r = Resource::alloc(Fractional::unit());
+            tracked_swap(&mut self.r, &mut r);
+            let f = Fractional::<T, Total>::Value { v: v, n: Total as int };
+            self.r = r.update(f);
         }
 
         pub proof fn update(tracked self, v: T) -> (tracked result: FractionalResource<T, Total>)
@@ -169,9 +230,9 @@ verus! {
                 result.val() == v,
                 result.frac() == self.frac(),
         {
-            let f = Fractional::<T, Total>::Value { v: v, n: Total as int };
-            let tracked r = self.r.update(f);
-            FractionalResource { r: r }
+            let tracked mut s = self;
+            s.update_mut(v);
+            s
         }
     }
 
