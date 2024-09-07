@@ -5,12 +5,15 @@ use std::sync::Arc;
 
 mod disk;
 
+use frac::FractionalResource;
+
 use disk::DiskView;
 use disk::MemCrashView;
+use disk::view_read;
 use disk::view_write;
 use disk::frac;
-use frac::FractionalResource;
 use disk::Disk;
+use disk::DiskReadPermission;
 use disk::DiskWritePermission;
 use disk::DiskBarrierPermission;
 use disk::DISK_INV_NS;
@@ -107,18 +110,17 @@ verus! {
               ( self.addr() == 0 && r.app_frac.val().crash == self.val() ) )
         }
 
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, InvPermResult))
+        proof fn apply(tracked self, tracked mut r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, InvPermResult))
         {
             let tracked mut mself = self;
-            let tracked mut res: FractionalResource<MemCrashView, 2> = FractionalResource::default();
             let tracked mut ires: Option<InvPermResult> = None;
             open_atomic_invariant!(credit => &mself.inv => inner => {
-                inner.disk.combine_mut(r);
-                inner.disk.update_mut(MemCrashView{
+                r.combine_mut(inner.disk);
+                r.update_mut(MemCrashView{
                         mem: view_write(r.val().mem, mself.addr(), mself.val()),
                         crash: if write_crash { view_write(r.val().crash, mself.addr(), mself.val()) } else { r.val().crash },
                     });
-                res = inner.disk.split_mut(1);
+                inner.disk = r.split_mut(1);
 
                 mself.disk2_frac.combine_mut(inner.disk2);
                 mself.disk2_frac.update_mut(inner.disk.val());
@@ -139,7 +141,7 @@ verus! {
                 })
             });
 
-            (res, ires.tracked_unwrap())
+            (r, ires.tracked_unwrap())
         }
     }
 
@@ -188,6 +190,51 @@ verus! {
         }
     }
 
+    pub struct InvReadPerm
+    {
+        pub a: u8,
+        pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
+        pub tracked app_frac: FractionalResource<AbsPair, 2>,
+        pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
+    }
+
+    impl DiskReadPermission<InvPermResult> for InvReadPerm
+    {
+        open spec fn id(&self) -> int { self.inv.constant().disk_id }
+        open spec fn addr(&self) -> u8 { self.a }
+
+        open spec fn pre(&self) -> bool {
+            self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
+            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
+            self.inv.namespace() == DISK_INV_NS
+        }
+
+        open spec fn post(&self, r: InvPermResult, v: u8) -> bool {
+            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
+            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
+
+            r.disk2_frac.val() == self.disk2_frac.val() &&
+            r.app_frac.val() == self.app_frac.val() &&
+
+            v == view_read(r.disk2_frac.val().mem, self.addr())
+        }
+
+        proof fn apply(tracked self, tracked mut r: FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, InvPermResult))
+        {
+            let tracked mut mself = self;
+            open_atomic_invariant!(credit => &mself.inv => inner => {
+                r.agree(&inner.disk);
+                mself.disk2_frac.agree(&inner.disk2);
+                mself.app_frac.agree(&inner.abs);
+            });
+
+            (r, InvPermResult{
+                disk2_frac: mself.disk2_frac,
+                app_frac: mself.app_frac,
+            })
+        }
+    }
+
     fn main()
     {
         let (mut d, Tracked(r)) = Disk::alloc();
@@ -213,17 +260,29 @@ verus! {
         let tracked i = AtomicInvariant::<_, _, DiskInvPred>::new(inv_param, inv_st, disk::DISK_INV_NS as int);
         let tracked i = Arc::new(i);
 
-        // let x0 = d.read(0, Tracked(&mut r));
-        // let x1 = d.read(1, Tracked(&mut r));
-        // assert(x0 == 0 && x1 == 0);
+        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        assert(x0 == 0 && x1 == 0);
 
         let tracked fupd = InvWritePerm{ a: 1u8, v: 5u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
         let Tracked(res) = d.write::<_, InvWritePerm>(1, 5, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
-        // let x0 = d.read(0, Tracked(&mut r));
-        // let x1 = d.read(1, Tracked(&mut r));
-        // assert(x0 == 0 && x1 == 5);
+        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        assert(x0 == 0 && x1 == 5);
 
         // Main point: commenting out this line makes the proof fail because
         // we might end up in a crash state where the first write (above)
@@ -237,9 +296,15 @@ verus! {
         let Tracked(res) = d.write::<_, InvWritePerm>(0, 2, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
-        // let x0 = d.read(0, Tracked(&mut r));
-        // let x1 = d.read(1, Tracked(&mut r));
-        // assert(x0 == 2 && x1 == 5);
+        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
+        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
+
+        assert(x0 == 2 && x1 == 5);
 
         ()
     }

@@ -78,6 +78,26 @@ verus! {
                 [ DISK_INV_NS ];
     }
 
+    pub trait DiskReadPermission<ResultT> {
+        spec fn addr(&self) -> u8;
+        spec fn id(&self) -> int;
+        spec fn pre(&self) -> bool;
+        spec fn post(&self, r: ResultT, v: u8) -> bool;
+        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+            where
+                Self: Sized
+            requires
+                self.pre(),
+                r.valid(self.id(), 1),
+                v == view_read(r.val().mem, self.addr()),
+            ensures
+                result.0.valid(self.id(), 1),
+                result.0.val() == r.val(),
+                self.post(result.1, v),
+            opens_invariants
+                [ DISK_INV_NS ];
+    }
+
     pub struct Disk
     {
         block0: u8,
@@ -131,7 +151,8 @@ verus! {
             (d, Tracked(r2))
         }
 
-        pub fn read(&self, addr: u8, Tracked(f): Tracked<&mut FractionalResource<MemCrashView, 2>>) -> (result: u8)
+        // Leftover, should really be implemented in terms of the fupd-style read() below.
+        pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&mut FractionalResource<MemCrashView, 2>>) -> (result: u8)
             requires
                 self.inv(),
                 old(f).inv(),
@@ -151,6 +172,33 @@ verus! {
             } else {
                 self.block1
             }
+        }
+
+        pub fn read<ResultT, Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<ResultT>))
+            where
+                Perm: DiskReadPermission<ResultT>
+            requires
+                old(self).inv(),
+                perm.pre(),
+                perm.addr() == addr,
+                perm.id() == old(self).id(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                perm.post(result.1@, result.0),
+        {
+            let v = if addr == 0 { self.block0 } else { self.block1 };
+            let credit = create_open_invariant_credit();
+            let tracked mut result: Option<ResultT> = None;
+            proof {
+                let tracked mut opt_frac = None;
+                tracked_swap(&mut self.frac, &mut opt_frac);
+                let tracked frac = opt_frac.tracked_unwrap();
+                let tracked (r, res) = perm.apply(frac, v, credit.get());
+                self.frac = Some(r);
+                result = Some(res)
+            };
+            (v, Tracked(result.tracked_unwrap()))
         }
 
         pub fn write<ResultT, Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
@@ -234,8 +282,8 @@ verus! {
         let (d, Tracked(r)) = Disk::alloc();
         let mut d = d;
 
-        let x0 = d.read(0, Tracked(&mut r));
-        let x1 = d.read(1, Tracked(&mut r));
+        let x0 = d.read_owned(0, Tracked(&mut r));
+        let x1 = d.read_owned(1, Tracked(&mut r));
         assert(x0 == 0 && x1 == 0);
 
         ()

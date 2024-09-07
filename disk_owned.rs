@@ -120,23 +120,23 @@ verus! {
     {
         let (mut d, Tracked(r)) = Disk::alloc();
 
-        let x0 = d.read(0, Tracked(&mut r));
-        let x1 = d.read(1, Tracked(&mut r));
+        let x0 = d.read_owned(0, Tracked(&mut r));
+        let x1 = d.read_owned(1, Tracked(&mut r));
         assert(x0 == 0 && x1 == 0);
 
         let tracked fupd = WriteFupd{ a: 1u8, v: 5u8, frac: r, abs_pre: 0, abs_post: 0 };
         let Tracked(r) = d.write::<_, WriteFupd>(1, 5, Tracked(fupd));
 
-        let x0 = d.read(0, Tracked(&mut r));
-        let x1 = d.read(1, Tracked(&mut r));
+        let x0 = d.read_owned(0, Tracked(&mut r));
+        let x1 = d.read_owned(1, Tracked(&mut r));
         assert(x0 == 0 && x1 == 5);
 
         // As another example, could use a different fupd to justify the write.
         let tracked fupd = WriteFupd1{ v: 7u8, frac: r, abs: 0 };
         let Tracked(r) = d.write::<_, WriteFupd1>(1, 7, Tracked(fupd));
 
-        let x0 = d.read(0, Tracked(&mut r));
-        let x1 = d.read(1, Tracked(&mut r));
+        let x0 = d.read_owned(0, Tracked(&mut r));
+        let x1 = d.read_owned(1, Tracked(&mut r));
         assert(x0 == 0 && x1 == 7);
 
         // Main point: commenting out this line makes the proof fail because
@@ -148,8 +148,8 @@ verus! {
         let tracked fupd = WriteFupd{ a: 0u8, v: 2u8, frac: r, abs_pre: 0, abs_post: 2 };
         let Tracked(r) = d.write::<_, WriteFupd>(0, 2, Tracked(fupd));
 
-        let x0 = d.read(0, Tracked(&mut r));
-        let x1 = d.read(1, Tracked(&mut r));
+        let x0 = d.read_owned(0, Tracked(&mut r));
+        let x1 = d.read_owned(1, Tracked(&mut r));
         assert(x0 == 2 && x1 == 7);
 
         ()
