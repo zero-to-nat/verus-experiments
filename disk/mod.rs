@@ -36,52 +36,44 @@ verus! {
         pub crash: DiskView,
     }
 
-    pub trait DiskWritePermission<ConstT> {
-        spec fn inv(&self) -> bool;
+    pub trait DiskWritePermission<ResultT> {
         spec fn addr(&self) -> u8;
         spec fn val(&self) -> u8;
         spec fn id(&self) -> int;
-        spec fn invoked(&self) -> bool;
-        spec fn pre(&self) -> ConstT;
-        proof fn apply(tracked &mut self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        spec fn pre(&self) -> bool;
+        spec fn post(&self, r: ResultT) -> bool;
+        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+            where
+                Self: Sized
             requires
-                old(self).inv(),
-                !old(self).invoked(),
-                r.valid(old(self).id(), 1),
+                self.pre(),
+                r.valid(self.id(), 1),
             ensures
-                self.invoked(),
-                self.inv(),
-                self.id() == old(self).id(),
-                self.addr() == old(self).addr(),
-                self.val() == old(self).val(),
-                self.pre() == old(self).pre(),
-                result.valid(self.id(), 1),
-                result.val() == (MemCrashView{
+                result.0.valid(self.id(), 1),
+                result.0.val() == (MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
-                })
+                }),
+                self.post(result.1),
             opens_invariants
                 [ DISK_INV_NS ];
     }
 
-    pub trait DiskBarrierPermission<ConstT> {
-        spec fn inv(&self) -> bool;
+    pub trait DiskBarrierPermission<ResultT> {
         spec fn id(&self) -> int;
-        spec fn invoked(&self) -> bool;
-        spec fn pre(&self) -> ConstT;
-        proof fn apply(tracked &mut self, tracked r: FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        spec fn pre(&self) -> bool;
+        spec fn post(&self, r: ResultT) -> bool;
+        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+            where
+                Self: Sized
             requires
-                old(self).inv(),
-                !old(self).invoked(),
-                r.valid(old(self).id(), 1),
+                self.pre(),
+                r.valid(self.id(), 1),
                 r.val().mem == r.val().crash,
             ensures
-                self.invoked(),
-                self.inv(),
-                self.id() == old(self).id(),
-                self.pre() == old(self).pre(),
-                result.valid(self.id(), 1),
-                result.val() == r.val(),
+                result.0.valid(self.id(), 1),
+                result.0.val() == r.val(),
+                self.post(result.1),
             opens_invariants
                 [ DISK_INV_NS ];
     }
@@ -161,25 +153,19 @@ verus! {
             }
         }
 
-        pub fn write<ConstT, Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<&mut Perm>)
+        pub fn write<ResultT, Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
             where
-                Perm: DiskWritePermission<ConstT> + ?Sized
+                Perm: DiskWritePermission<ResultT>
             requires
                 old(self).inv(),
-                old(perm).inv(),
-                old(perm).addr() == addr,
-                old(perm).val() == val,
-                old(perm).id() == old(self).id(),
-                !old(perm).invoked(),
+                perm.pre(),
+                perm.addr() == addr,
+                perm.val() == val,
+                perm.id() == old(self).id(),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.inv(),
-                perm.invoked(),
-                perm.id() == old(perm).id(),
-                perm.pre() == old(perm).pre(),
-                perm.addr() == old(perm).addr(),
-                perm.val() == old(perm).val(),
+                perm.post(result@),
         {
             if addr == 0 {
                 self.block0 = val
@@ -187,6 +173,7 @@ verus! {
                 self.block1 = val
             };
             let credit = create_open_invariant_credit();
+            let tracked mut result: Option<ResultT> = None;
             proof {
                 let tracked mut opt_frac = None;
                 tracked_swap(&mut self.frac, &mut opt_frac);
@@ -195,9 +182,11 @@ verus! {
                 if write_crash {
                     self.durable = view_write(self.durable, addr, val)
                 };
-                let tracked r = perm.apply(frac, write_crash, credit.get());
+                let tracked (r, res) = perm.apply(frac, write_crash, credit.get());
                 self.frac = Some(r);
-            }
+                result = Some(res)
+            };
+            Tracked(result.tracked_unwrap())
         }
 
         // Leftover, should really be implemented in terms of the fupd-style barrier() below
@@ -212,32 +201,31 @@ verus! {
             unimplemented!()
         }
 
-        pub fn barrier<ConstT, Perm>(&mut self, Tracked(perm): Tracked<&mut Perm>)
+        pub fn barrier<ResultT, Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
             where
-                Perm: DiskBarrierPermission<ConstT> + ?Sized
+                Perm: DiskBarrierPermission<ResultT>
             requires
                 old(self).inv(),
-                old(perm).inv(),
-                old(perm).id() == old(self).id(),
-                !old(perm).invoked(),
+                perm.pre(),
+                perm.id() == old(self).id(),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.inv(),
-                perm.invoked(),
-                perm.id() == old(perm).id(),
-                perm.pre() == old(perm).pre(),
+                perm.post(result@),
         {
             assert(self.durable == (self.block0, self.block1)) by { admit() };
 
             let credit = create_open_invariant_credit();
+            let tracked mut result: Option<ResultT> = None;
             proof {
                 let tracked mut opt_frac = None;
                 tracked_swap(&mut self.frac, &mut opt_frac);
                 let tracked frac = opt_frac.tracked_unwrap();
-                let tracked r = perm.apply(frac, credit.get());
+                let tracked (r, res) = perm.apply(frac, credit.get());
                 self.frac = Some(r);
-            }
+                result = Some(res)
+            };
+            Tracked(result.tracked_unwrap())
         }
     }
 
