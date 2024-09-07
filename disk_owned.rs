@@ -60,16 +60,14 @@ verus! {
               abs_inv(self.abs_post, r.val().crash) )
         }
 
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, FractionalResource<MemCrashView, 2>))
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
-            let tracked mut sf = self.frac;
-            sf.combine_mut(r);
-            sf.update_mut(MemCrashView{
+            r.combine_mut(self.frac);
+            r.update_mut(MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
                 });
-            let tracked r = sf.split_mut(1);
-            (r, sf)
+            r.split_mut(1)
         }
     }
 
@@ -103,16 +101,14 @@ verus! {
             abs_inv(self.abs, r.val().crash)
         }
 
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, FractionalResource<MemCrashView, 2>))
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
-            let tracked mut sf = self.frac;
-            sf.combine_mut(r);
-            sf.update_mut(MemCrashView{
+            r.combine_mut(self.frac);
+            r.update_mut(MemCrashView{
                     mem: view_write(r.val().mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
                 });
-            let tracked r = sf.split_mut(1);
-            (r, sf)
+            r.split_mut(1)
         }
     }
 

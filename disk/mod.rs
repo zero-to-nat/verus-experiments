@@ -42,19 +42,19 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT) -> bool;
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
             where
                 Self: Sized
             requires
                 self.pre(),
-                r.valid(self.id(), 1),
+                old(r).valid(self.id(), 1),
             ensures
-                result.0.valid(self.id(), 1),
-                result.0.val() == (MemCrashView{
-                    mem: view_write(r.val().mem, self.addr(), self.val()),
-                    crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
+                r.valid(self.id(), 1),
+                r.val() == (MemCrashView{
+                    mem: view_write(old(r).val().mem, self.addr(), self.val()),
+                    crash: if write_crash { view_write(old(r).val().crash, self.addr(), self.val()) } else { old(r).val().crash },
                 }),
-                self.post(result.1),
+                self.post(result),
             opens_invariants
                 [ DISK_INV_NS ];
     }
@@ -63,17 +63,17 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT) -> bool;
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
             where
                 Self: Sized
             requires
                 self.pre(),
-                r.valid(self.id(), 1),
-                r.val().mem == r.val().crash,
+                old(r).valid(self.id(), 1),
+                old(r).val().mem == old(r).val().crash,
             ensures
-                result.0.valid(self.id(), 1),
-                result.0.val() == r.val(),
-                self.post(result.1),
+                r.valid(self.id(), 1),
+                r.val() == old(r).val(),
+                self.post(result),
             opens_invariants
                 [ DISK_INV_NS ];
     }
@@ -83,17 +83,17 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT, v: u8) -> bool;
-        proof fn apply(tracked self, tracked r: FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: (FractionalResource<MemCrashView, 2>, ResultT))
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
             where
                 Self: Sized
             requires
                 self.pre(),
-                r.valid(self.id(), 1),
-                v == view_read(r.val().mem, self.addr()),
+                old(r).valid(self.id(), 1),
+                v == view_read(old(r).val().mem, self.addr()),
             ensures
-                result.0.valid(self.id(), 1),
-                result.0.val() == r.val(),
-                self.post(result.1, v),
+                r.valid(self.id(), 1),
+                r.val() == old(r).val(),
+                self.post(result, v),
             opens_invariants
                 [ DISK_INV_NS ];
     }
@@ -193,9 +193,9 @@ verus! {
             proof {
                 let tracked mut opt_frac = None;
                 tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked frac = opt_frac.tracked_unwrap();
-                let tracked (r, res) = perm.apply(frac, v, credit.get());
-                self.frac = Some(r);
+                let tracked mut frac = opt_frac.tracked_unwrap();
+                let tracked res = perm.apply(&mut frac, v, credit.get());
+                self.frac = Some(frac);
                 result = Some(res)
             };
             (v, Tracked(result.tracked_unwrap()))
@@ -225,13 +225,13 @@ verus! {
             proof {
                 let tracked mut opt_frac = None;
                 tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked frac = opt_frac.tracked_unwrap();
+                let tracked mut frac = opt_frac.tracked_unwrap();
                 let write_crash = vstd::pervasive::arbitrary();
                 if write_crash {
                     self.durable = view_write(self.durable, addr, val)
                 };
-                let tracked (r, res) = perm.apply(frac, write_crash, credit.get());
-                self.frac = Some(r);
+                let tracked res = perm.apply(&mut frac, write_crash, credit.get());
+                self.frac = Some(frac);
                 result = Some(res)
             };
             Tracked(result.tracked_unwrap())
@@ -268,9 +268,9 @@ verus! {
             proof {
                 let tracked mut opt_frac = None;
                 tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked frac = opt_frac.tracked_unwrap();
-                let tracked (r, res) = perm.apply(frac, credit.get());
-                self.frac = Some(r);
+                let tracked mut frac = opt_frac.tracked_unwrap();
+                let tracked res = perm.apply(&mut frac, credit.get());
+                self.frac = Some(frac);
                 result = Some(res)
             };
             Tracked(result.tracked_unwrap())
