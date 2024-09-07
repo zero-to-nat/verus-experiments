@@ -71,13 +71,12 @@ verus! {
         pub v: u8,
         pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
         pub tracked app_frac: FractionalResource<AbsPair, 2>,
-        pub ghost constant: DiskInvParam,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
     }
 
     impl DiskWritePermission<InvPermResult> for InvWritePerm
     {
-        open spec fn id(&self) -> int { self.constant.disk_id }
+        open spec fn id(&self) -> int { self.inv.constant().disk_id }
         open spec fn addr(&self) -> u8 { self.a }
         open spec fn val(&self) -> u8 { self.v }
 
@@ -86,7 +85,6 @@ verus! {
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
             self.inv.namespace() == DISK_INV_NS &&
-            self.inv.constant() == self.constant &&
 
             if self.addr() == 0 {
                 self.val() <= self.disk2_frac.val().mem.1 &&
@@ -98,12 +96,12 @@ verus! {
         }
 
         open spec fn post(&self, r: InvPermResult) -> bool {
-            r.disk2_frac.valid(self.constant.disk2_id, 1) &&
+            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             r.disk2_frac.val().mem == view_write(self.disk2_frac.val().mem, self.addr(), self.val()) &&
             ( r.disk2_frac.val().crash == self.disk2_frac.val().crash ||
               r.disk2_frac.val().crash == view_write(self.disk2_frac.val().crash, self.addr(), self.val()) ) &&
 
-            r.app_frac.valid(self.constant.abs_id, 1) &&
+            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
             r.app_frac.val().mem == if self.addr() == 0 { self.val() } else { self.app_frac.val().mem } &&
             ( r.app_frac.val().crash == self.app_frac.val().crash ||
               ( self.addr() == 0 && r.app_frac.val().crash == self.val() ) )
@@ -149,7 +147,6 @@ verus! {
     {
         pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
         pub tracked app_frac: FractionalResource<AbsPair, 2>,
-        pub ghost constant: DiskInvParam,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
     }
 
@@ -161,13 +158,12 @@ verus! {
             self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
-            self.inv.namespace() == DISK_INV_NS &&
-            self.inv.constant() == self.constant
+            self.inv.namespace() == DISK_INV_NS
         }
 
         open spec fn post(&self, r: InvPermResult) -> bool {
-            r.disk2_frac.valid(self.constant.disk2_id, 1) &&
-            r.app_frac.valid(self.constant.abs_id, 1) &&
+            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
+            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
             r.disk2_frac.val() == self.disk2_frac.val() &&
             r.disk2_frac.val().mem == r.disk2_frac.val().crash &&
@@ -221,7 +217,7 @@ verus! {
         // let x1 = d.read(1, Tracked(&mut r));
         // assert(x0 == 0 && x1 == 0);
 
-        let tracked fupd = InvWritePerm{ a: 1u8, v: 5u8, disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
+        let tracked fupd = InvWritePerm{ a: 1u8, v: 5u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
         let Tracked(res) = d.write::<_, InvWritePerm>(1, 5, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
@@ -233,11 +229,11 @@ verus! {
         // we might end up in a crash state where the first write (above)
         // didn't happen but the second write (below) does happen, and that
         // violates the invariant that block0 <= block1.
-        let tracked fupd = InvBarrierPerm{ disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
+        let tracked fupd = InvBarrierPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
         let Tracked(res) = d.barrier::<_, InvBarrierPerm>(Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
-        let tracked fupd = InvWritePerm{ a: 0u8, v: 2u8, disk2_frac: disk_r, app_frac: app_r, constant: i.constant(), inv: i.clone() };
+        let tracked fupd = InvWritePerm{ a: 0u8, v: 2u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
         let Tracked(res) = d.write::<_, InvWritePerm>(0, 2, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
