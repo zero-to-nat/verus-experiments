@@ -177,10 +177,6 @@ verus! {
                seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()));
     }
 
-    pub open spec fn all_elements_unique(seq: Seq<int>) -> bool {
-        forall |i: int, j: int| 0 <= i < j < seq.len() ==> seq[i] != seq[j]
-    }
-
     pub open spec fn valid_index<T>(s: Seq<T>, i: int) -> bool {
         0 <= i < s.len()
     }
@@ -222,7 +218,7 @@ verus! {
     #[verifier::external_body]
     pub proof fn sum_seq_indexes(s: Seq<nat>, indexes: Seq<int>)
         requires
-            all_elements_unique(indexes),
+            indexes.no_duplicates(),
             valid_indexes(s, indexes),
         ensures
             sum(seq_indexes(s, indexes)) <= sum(s)
@@ -254,7 +250,7 @@ verus! {
 
     pub proof fn popcnt_seq_indexes(disk: Seq<u8>, addrs: Seq<int>)
         requires
-            all_elements_unique(addrs),
+            addrs.no_duplicates(),
             valid_indexes(disk, addrs),
         ensures
             popcnt(seq_indexes(disk, addrs)) <= popcnt(disk)
@@ -267,7 +263,7 @@ verus! {
     pub proof fn hamming_seq_indexes(disk1: Seq<u8>, disk2: Seq<u8>, addrs: Seq<int>)
         requires
             disk1.len() == disk2.len(),
-            all_elements_unique(addrs),
+            addrs.no_duplicates(),
             valid_indexes(disk1, addrs),
         ensures
             hamming(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) <= hamming(disk1, disk2),
@@ -326,7 +322,7 @@ verus! {
             y == spec_crc64(x),
             y_c == spec_crc64(x_c),
 
-            all_elements_unique(x_addrs + y_addrs),
+            (x_addrs + y_addrs).no_duplicates(),
             corrupt.len() == disk.len(),
             valid_indexes(disk, x_addrs + y_addrs),
 
