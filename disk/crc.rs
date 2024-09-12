@@ -35,17 +35,17 @@ verus! {
     pub open spec fn spec_crc64_hamming_bound(len: nat) -> nat {
         // From https://users.ece.cmu.edu/~koopman/crc/crc64.html as one example.
         // For the CRC64-ECMA variant.
-        if len <= 32768 {
+        if len <= (32768+7)/8 {
             8
-        } else if len <= 32768 {
+        } else if len <= (32768+7)/8 {
             7
-        } else if len <= 126701 {
+        } else if len <= (126701+7)/8 {
             6
-        } else if len <= 126701 {
+        } else if len <= (126701+7)/8 {
             5
-        } else if len <= 8589606850 {
+        } else if len <= (8589606850+7)/8 {
             4
-        } else if len <= 8589606850 {
+        } else if len <= (8589606850+7)/8 {
             3
         } else {
             2
