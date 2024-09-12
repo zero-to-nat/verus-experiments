@@ -67,9 +67,9 @@ verus! {
             crc1 == spec_crc64(bytes1),
             crc2 == spec_crc64(bytes2),
             (bytes1 + crc1).len() == (bytes2 + crc2).len(),
-            hamming(bytes1 + crc1, bytes2 + crc2) <= spec_crc64_hamming_bound((bytes1 + crc1).len()),
         ensures
-            bytes1 == bytes2,
+            bytes1 == bytes2 ||
+            hamming(bytes1 + crc1, bytes2 + crc2) >= spec_crc64_hamming_bound((bytes1 + crc1).len())
     {}
 
     pub struct Disk {
