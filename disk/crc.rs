@@ -14,8 +14,12 @@ verus! {
         l.fold_left(0, |s: nat, i| { s+i as nat })
     }
 
+    pub open spec fn seq_popcnt(l: Seq<u8>) -> Seq<nat> {
+        l.map_values(|v: u8| popcnt_byte(v))
+    }
+
     pub open spec fn popcnt(l: Seq<u8>) -> nat {
-        sum(l.map_values(|v: u8| popcnt_byte(v)))
+        sum(seq_popcnt(l))
     }
 
     pub open spec fn xor(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
@@ -156,23 +160,125 @@ verus! {
         }
     }
 
-    pub open spec fn disk_reads(disk: Seq<u8>, addrs: Seq<int>) -> Seq<u8> {
-        addrs.map_values(|a: int| disk[a])
+    pub open spec fn seq_indexes<T>(s: Seq<T>, indexes: Seq<int>) -> Seq<T> {
+        indexes.map_values(|a: int| s[a])
+    }
+
+    pub proof fn seq_indexes_first<T>(s: Seq<T>, indexes: Seq<int>)
+        requires
+            indexes.len() > 0,
+            valid_indexes(s, indexes),
+        ensures
+            seq_indexes(s, indexes) == seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())
+    {
+        assert(valid_index(s, indexes[0]));
+        assert(indexes == seq![indexes[0]] + indexes.drop_first());
+        assert(seq_indexes(s, seq![indexes[0]] + indexes.drop_first()) ==
+               seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()));
     }
 
     pub open spec fn all_elements_unique(seq: Seq<int>) -> bool {
         forall |i: int, j: int| 0 <= i < j < seq.len() ==> seq[i] != seq[j]
     }
 
-    // Proof TBD, but should be provable.
+    pub open spec fn valid_index<T>(s: Seq<T>, i: int) -> bool {
+        0 <= i < s.len()
+    }
+
+    pub open spec fn valid_indexes<T>(s: Seq<T>, indexes: Seq<int>) -> bool {
+        forall |i: int| 0 <= i < indexes.len() ==> #[trigger] valid_index(s, indexes[i])
+    }
+
+    pub proof fn xor_seq_indexes(disk1: Seq<u8>, disk2: Seq<u8>, addrs: Seq<int>)
+        requires
+            disk1.len() == disk2.len(),
+            valid_indexes(disk1, addrs),
+        ensures
+            xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == seq_indexes(xor(disk1, disk2), addrs)
+        decreases
+            addrs.len()
+    {
+        if addrs.len() == 0 {
+            assert(xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == seq_indexes(xor(disk1, disk2), addrs))
+        } else {
+            xor_seq_indexes(disk1, disk2, addrs.drop_first());
+            assert(addrs == seq![addrs[0]] + addrs.drop_first());
+            assert(seq_indexes(disk1, seq![addrs[0]] + addrs.drop_first()) ==
+                   seq![disk1[addrs[0]]] + seq_indexes(disk1, addrs.drop_first()));
+            assert(seq_indexes(disk2, seq![addrs[0]] + addrs.drop_first()) ==
+                   seq![disk2[addrs[0]]] + seq_indexes(disk2, addrs.drop_first()));
+            assert(seq_indexes(xor(disk1, disk2), seq![addrs[0]] + addrs.drop_first()) ==
+                   seq![xor(disk1, disk2)[addrs[0]]] + seq_indexes(xor(disk1, disk2), addrs.drop_first()));
+            assert(xor(seq![disk1[addrs[0]]] + seq_indexes(disk1, addrs.drop_first()),
+                       seq![disk2[addrs[0]]] + seq_indexes(disk2, addrs.drop_first())) ==
+                   seq![disk1[addrs[0]] ^ disk2[addrs[0]]] +
+                   xor(seq_indexes(disk1, addrs.drop_first()),
+                       seq_indexes(disk2, addrs.drop_first())));
+            assert(valid_index(disk1, addrs[0]));
+        }
+    }
+
+    // Proof TBD.
     #[verifier::external_body]
-    pub proof fn hamming_disk_reads(disk1: Seq<u8>, disk2: Seq<u8>, addrs: Seq<int>)
+    pub proof fn sum_seq_indexes(s: Seq<nat>, indexes: Seq<int>)
+        requires
+            all_elements_unique(indexes),
+            valid_indexes(s, indexes),
+        ensures
+            sum(seq_indexes(s, indexes)) <= sum(s)
+    {
+    }
+
+    pub proof fn seq_popcnt_indexes(s: Seq<u8>, indexes: Seq<int>)
+        requires
+            valid_indexes(s, indexes)
+        ensures
+            seq_popcnt(seq_indexes(s, indexes)) == seq_indexes(seq_popcnt(s), indexes)
+        decreases
+            indexes.len()
+    {
+        if indexes.len() == 0 {
+            assert(seq_popcnt(seq_indexes(s, indexes)) == seq_indexes(seq_popcnt(s), indexes))
+        } else {
+            seq_popcnt_indexes(s, indexes.drop_first());
+            seq_indexes_first(s, indexes);
+            assert(valid_index(s, indexes[0]));
+            assert(seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())) ==
+                   seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())));
+            assert(seq_popcnt(seq_indexes(s, indexes)) ==
+                   seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())));
+            assert(seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())) ==
+                   seq_indexes(seq_popcnt(s), indexes));
+        }
+    }
+
+    pub proof fn popcnt_seq_indexes(disk: Seq<u8>, addrs: Seq<int>)
+        requires
+            all_elements_unique(addrs),
+            valid_indexes(disk, addrs),
+        ensures
+            popcnt(seq_indexes(disk, addrs)) <= popcnt(disk)
+    {
+        assert(forall |i: int| 0 <= i < addrs.len() ==> valid_index(disk, addrs[i]) ==> #[trigger] valid_index(seq_popcnt(disk), addrs[i]));
+        sum_seq_indexes(seq_popcnt(disk), addrs);
+        seq_popcnt_indexes(disk, addrs);
+    }
+
+    pub proof fn hamming_seq_indexes(disk1: Seq<u8>, disk2: Seq<u8>, addrs: Seq<int>)
         requires
             disk1.len() == disk2.len(),
             all_elements_unique(addrs),
+            valid_indexes(disk1, addrs),
         ensures
-            hamming(disk_reads(disk1, addrs), disk_reads(disk2, addrs)) <= hamming(disk1, disk2),
+            hamming(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) <= hamming(disk1, disk2),
     {
+        assert(hamming(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == popcnt(xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs))));
+        xor_seq_indexes(disk1, disk2, addrs);
+        assert(xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) ==
+               seq_indexes(xor(disk1, disk2), addrs));
+        assert(hamming(disk1, disk2) == popcnt(xor(disk1, disk2)));
+        assert(forall |i: int| 0 <= i < addrs.len() ==> valid_index(disk1, addrs[i]) ==> #[trigger] valid_index(xor(disk1, disk2), addrs[i]));
+        popcnt_seq_indexes(xor(disk1, disk2), addrs);
     }
 
     pub proof fn byte_xor_xor(a: u8, b: u8)
@@ -194,19 +300,19 @@ verus! {
             assert(xor(xor(a, b), a) == b)
         } else {
             byte_xor_xor(a[0], b[0]);
-            list_xor_xor(a.subrange(1, a.len() as int), b.subrange(1, b.len() as int));
+            list_xor_xor(a.drop_first(), b.drop_first());
 
-            assert(a == seq![a[0]] + a.subrange(1, a.len() as int));
-            assert(b == seq![b[0]] + b.subrange(1, b.len() as int));
-            assert(xor(seq![a[0]] + a.subrange(1, a.len() as int),
-                       seq![b[0]] + b.subrange(1, b.len() as int)) ==
+            assert(a == seq![a[0]] + a.drop_first());
+            assert(b == seq![b[0]] + b.drop_first());
+            assert(xor(seq![a[0]] + a.drop_first(),
+                       seq![b[0]] + b.drop_first()) ==
                    seq![a[0] ^ b[0]] +
-                   xor(a.subrange(1, a.len() as int), b.subrange(1, b.len() as int)));
-            assert(xor(seq![a[0] ^ b[0]] + xor(a.subrange(1, a.len() as int), b.subrange(1, b.len() as int)),
-                       seq![a[0]] + a.subrange(1, a.len() as int)) ==
+                   xor(a.drop_first(), b.drop_first()));
+            assert(xor(seq![a[0] ^ b[0]] + xor(a.drop_first(), b.drop_first()),
+                       seq![a[0]] + a.drop_first()) ==
                    seq![(a[0] ^ b[0]) ^ a[0]] +
-                   xor(xor(a.subrange(1, a.len() as int), b.subrange(1, b.len() as int)),
-                       a.subrange(1, a.len() as int)));
+                   xor(xor(a.drop_first(), b.drop_first()),
+                       a.drop_first()));
 
             // Q: how to search for verus lemmas?
         }
@@ -222,23 +328,25 @@ verus! {
 
             all_elements_unique(x_addrs + y_addrs),
             corrupt.len() == disk.len(),
+            valid_indexes(disk, x_addrs + y_addrs),
 
-            x == disk_reads(disk, x_addrs),
-            x_c == disk_reads(xor(disk, corrupt), x_addrs),
-            y == disk_reads(disk, y_addrs),
-            y_c == disk_reads(xor(disk, corrupt), y_addrs),
+            x == seq_indexes(disk, x_addrs),
+            x_c == seq_indexes(xor(disk, corrupt), x_addrs),
+            y == seq_indexes(disk, y_addrs),
+            y_c == seq_indexes(xor(disk, corrupt), y_addrs),
             popcnt(corrupt) < spec_crc64_hamming_bound((x+y).len()),
         ensures
             x == x_c
     {
         crc64_spec_len(x);
         crc64_spec_len(x_c);
-        hamming_disk_reads(xor(disk, corrupt), disk, x_addrs + y_addrs);
+        assert(forall |i: int| 0 <= i < (x_addrs + y_addrs).len() ==> valid_index(disk, (x_addrs + y_addrs)[i]) ==> #[trigger] valid_index(xor(disk, corrupt), (x_addrs + y_addrs)[i]));
+        hamming_seq_indexes(xor(disk, corrupt), disk, x_addrs + y_addrs);
         list_xor_xor(disk, corrupt);
-        assert(disk_reads(xor(disk, corrupt), x_addrs + y_addrs) ==
-               disk_reads(xor(disk, corrupt), x_addrs) + disk_reads(xor(disk, corrupt), y_addrs));
-        assert(disk_reads(disk, x_addrs + y_addrs) ==
-               disk_reads(disk, x_addrs) + disk_reads(disk, y_addrs));
+        assert(seq_indexes(xor(disk, corrupt), x_addrs + y_addrs) ==
+               seq_indexes(xor(disk, corrupt), x_addrs) + seq_indexes(xor(disk, corrupt), y_addrs));
+        assert(seq_indexes(disk, x_addrs + y_addrs) ==
+               seq_indexes(disk, x_addrs) + seq_indexes(disk, y_addrs));
         crc64_hamming_bound_valid(x_c, x, y_c, y);
     }
 
