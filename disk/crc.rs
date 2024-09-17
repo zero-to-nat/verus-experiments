@@ -85,54 +85,35 @@ verus! {
     {}
 
     pub struct Disk {
-        ghost data: Seq<u8>,
-    }
-
-    pub struct DiskCorruption {
-        ghost v: Seq<u8>,
-        ghost max_bits: nat,
-    }
-
-    impl DiskCorruption {
-        pub closed spec fn view(&self) -> Seq<u8> { self.v }
-        pub closed spec fn max_bits(&self) -> nat { self.max_bits }
-
-        #[verifier::external_body]
-        pub proof fn alloc(len: nat, max_bits: nat) -> (tracked res: DiskCorruption)
-            ensures
-                res@.len() == len,
-                res.max_bits() == max_bits,
-        {
-            unimplemented!()
-        }
-
-        #[verifier::external_body]
-        pub proof fn validate(&self)
-            ensures
-                popcnt(self@) <= self.max_bits(),
-        {}
-
-        #[verifier::external_body]
-        pub proof fn refresh(tracked self) -> (tracked res: DiskCorruption)
-            ensures
-                res@.len() == self@.len(),
-                res.max_bits() == self.max_bits(),
-        {
-            unimplemented!()
-        }
+        data: Ghost<Seq<u8>>,
+        corruption: Ghost<Seq<u8>>,
+        corruption_bits: Ghost<nat>,
     }
 
     impl Disk {
-        pub closed spec fn view(&self) -> Seq<u8> { self.data }
-        pub closed spec fn inv(&self) -> bool;
+        pub closed spec fn view(&self) -> Seq<u8> { self.data@ }
+        pub closed spec fn corrupt(&self) -> Seq<u8> { self.corruption@ }
+        pub closed spec fn corrupt_bits(&self) -> nat { self.corruption_bits@ }
 
+        pub closed spec fn inv(&self) -> bool {
+            self.data@.len() == self.corruption@.len() && popcnt(self.corruption@) <= self.corruption_bits@
+        }
+
+        // external_body because it's tricky to prove there exists a sequence
+        // with a suitably small popcnt() value.
         #[verifier::external_body]
-        pub fn alloc(len: u64) -> (res: Disk)
+        pub fn alloc(len: u64, Ghost(max_corrupt): Ghost<nat>) -> (res: Disk)
             ensures
                 res.inv(),
                 res@.len() == len,
         {
-            unimplemented!()
+            let ghost disk = Seq::new(len as nat, |i: int| 0);
+            let ghost corrupt = choose |s: Seq<u8>| popcnt(s) <= max_corrupt;
+            Disk{
+                data: Ghost(disk),
+                corruption: Ghost(corrupt),
+                corruption_bits: Ghost(max_corrupt),
+            }
         }
 
         #[verifier::external_body]
@@ -143,18 +124,20 @@ verus! {
             ensures
                 self.inv(),
                 self@ == old(self)@.update(addr as int, val),
+                self.corrupt() == old(self).corrupt(),
+                self.corrupt_bits() == old(self).corrupt_bits(),
         {
             unimplemented!()
         }
 
         #[verifier::external_body]
-        pub fn read(&self, addr: u64, Tracked(corrupt): &Tracked<DiskCorruption>) -> (res: u8)
+        pub fn read(&self, addr: u64) -> (res: (u8, Ghost<Seq<u8>>))
             requires
                 self.inv(),
                 addr < self@.len(),
-                corrupt@.len() == self@.len(),
             ensures
-                res == self@[addr as int] ^ corrupt@[addr as int],
+                res.1@.len() == self@.len(),
+                res.0 == self@[addr as int] ^ (res.1@[addr as int] & self.corrupt()[addr as int]),
         {
             unimplemented!()
         }
@@ -351,18 +334,16 @@ verus! {
         // assert(hamming_byte(0x00, 0x01) == 1);
         // assert(hamming(seq![0x00, 0x10, 0x08], seq![0x01, 0x10, 0x08]) == 1);
 
-        let mut d = Disk::alloc(128);
+        let mut d = Disk::alloc(128, Ghost(0));
         d.write(5, 123);
-        let corrupt0 = Tracked(DiskCorruption::alloc(d@.len(), 0));
-        let v0 = d.read(5, &corrupt0);
-        let v1 = d.read(5, &corrupt0);
-        assert(v0 == v1);
+        let v0 = d.read(5);
+        let v1 = d.read(5);
+        // assert(v0 == v1);
 
         // assert(corrupt0@@[5] == 0);
         // assert(v0 == 123 ^ corrupt0@@[5]);
 
-        let corrupt1 = Tracked(corrupt0.get().refresh());
-        let v2 = d.read(5, &corrupt1);
+        let v2 = d.read(5);
         // assert(v0 == v2);
     }
 }
