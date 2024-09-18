@@ -36,15 +36,13 @@ verus! {
         pub crash: DiskView,
     }
 
-    pub trait DiskWritePermission<ResultT> {
+    pub trait DiskWritePermission<ResultT> where Self: Sized {
         spec fn addr(&self) -> u8;
         spec fn val(&self) -> u8;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT) -> bool;
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
-            where
-                Self: Sized
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
@@ -59,13 +57,11 @@ verus! {
                 [ DISK_INV_NS ];
     }
 
-    pub trait DiskBarrierPermission<ResultT> {
+    pub trait DiskBarrierPermission<ResultT> where Self: Sized {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT) -> bool;
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
-            where
-                Self: Sized
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
@@ -78,7 +74,7 @@ verus! {
                 [ DISK_INV_NS ];
     }
 
-    pub trait DiskReadPermission<ResultT> {
+    pub trait DiskReadPermission<ResultT> where Self: Sized {
         spec fn addr(&self) -> u8;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
@@ -92,8 +88,6 @@ verus! {
             opens_invariants
                 [ DISK_INV_NS ];
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
-            where
-                Self: Sized
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
