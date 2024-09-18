@@ -206,7 +206,8 @@ verus! {
         open spec fn pre(&self) -> bool {
             self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-            self.inv.namespace() == DISK_INV_NS
+            self.inv.namespace() == DISK_INV_NS &&
+            ( self.addr() == 0 || self.addr() == 1 )
         }
 
         open spec fn post(&self, r: InvPermResult, v: u8) -> bool {
@@ -217,6 +218,14 @@ verus! {
             r.app_frac.val() == self.app_frac.val() &&
 
             v == view_read(r.disk2_frac.val().mem, self.addr())
+        }
+
+        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        {
+            let tracked mut mself = self;
+            open_atomic_invariant!(credit => &mself.inv => inner => {
+                inner.disk.agree(&r);
+            });
         }
 
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
