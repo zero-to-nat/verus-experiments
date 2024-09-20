@@ -1,6 +1,5 @@
 use builtin::*;
 use vstd::prelude::*;
-use vstd::modes::*;
 use vstd::invariant::*;
 
 pub mod frac;
@@ -105,23 +104,22 @@ verus! {
         block0: u8,
         block1: u8,
         ghost durable: DiskView,    // Prophecy-style crash state
-        tracked frac: Option<FractionalResource<MemCrashView, 2>>,
+        frac: Tracked<FractionalResource<MemCrashView, 2>>,
     }
 
     impl Disk
     {
         pub closed spec fn inv(&self) -> bool
         {
-            self.frac.is_Some() &&
-            self.frac.unwrap().inv() &&
-            self.frac.unwrap().val().crash == self.durable &&
-            self.frac.unwrap().val().mem == (self.block0, self.block1) &&
-            self.frac.unwrap().frac() == 1
+            self.frac@.inv() &&
+            self.frac@.val().crash == self.durable &&
+            self.frac@.val().mem == (self.block0, self.block1) &&
+            self.frac@.frac() == 1
         }
 
         pub closed spec fn id(&self) -> int
         {
-            self.frac.unwrap().id()
+            self.frac@.id()
         }
 
         pub fn alloc() -> (res: (Disk, Tracked<FractionalResource::<MemCrashView, 2>>))
@@ -144,11 +142,7 @@ verus! {
                 block0: 0,
                 block1: 0,
                 durable: (0, 0),
-                // XXX why can't this directly assign Some(r1)?
-                frac: None,
-            };
-            proof {
-                d.frac = Some(r1)
+                frac: Tracked(r1),
             };
             (d, Tracked(r2))
         }
@@ -164,10 +158,7 @@ verus! {
                 f == old(f),
         {
             proof {
-                match &self.frac {
-                    None => (),
-                    Some(ref self_f) => f.agree(self_f),
-                }
+                f.agree(self.frac.borrow())
             };
             if addr == 0 {
                 self.block0
@@ -192,22 +183,14 @@ verus! {
             // Just to make sure validation works, try to invoke validate().
             let credit = create_open_invariant_credit();
             proof {
-                let tracked mut opt_frac = None;
-                tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked frac = opt_frac.tracked_unwrap();
-                perm.validate(&frac, credit.get());
-                self.frac = Some(frac);
+                perm.validate(&self.frac.borrow_mut(), credit.get())
             };
 
             let v = if addr == 0 { self.block0 } else { self.block1 };
             let credit = create_open_invariant_credit();
             let tracked mut result: Option<ResultT> = None;
             proof {
-                let tracked mut opt_frac = None;
-                tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked mut frac = opt_frac.tracked_unwrap();
-                let tracked res = perm.apply(&mut frac, v, credit.get());
-                self.frac = Some(frac);
+                let tracked res = perm.apply(self.frac.borrow_mut(), v, credit.get());
                 result = Some(res)
             };
             (v, Tracked(result.tracked_unwrap()))
@@ -235,15 +218,11 @@ verus! {
             let credit = create_open_invariant_credit();
             let tracked mut result: Option<ResultT> = None;
             proof {
-                let tracked mut opt_frac = None;
-                tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked mut frac = opt_frac.tracked_unwrap();
                 let write_crash = vstd::pervasive::arbitrary();
                 if write_crash {
                     self.durable = view_write(self.durable, addr, val)
                 };
-                let tracked res = perm.apply(&mut frac, write_crash, credit.get());
-                self.frac = Some(frac);
+                let tracked res = perm.apply(self.frac.borrow_mut(), write_crash, credit.get());
                 result = Some(res)
             };
             Tracked(result.tracked_unwrap())
@@ -278,11 +257,7 @@ verus! {
             let credit = create_open_invariant_credit();
             let tracked mut result: Option<ResultT> = None;
             proof {
-                let tracked mut opt_frac = None;
-                tracked_swap(&mut self.frac, &mut opt_frac);
-                let tracked mut frac = opt_frac.tracked_unwrap();
-                let tracked res = perm.apply(&mut frac, credit.get());
-                self.frac = Some(frac);
+                let tracked res = perm.apply(self.frac.borrow_mut(), credit.get());
                 result = Some(res)
             };
             Tracked(result.tracked_unwrap())
