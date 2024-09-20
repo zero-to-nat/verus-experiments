@@ -220,11 +220,11 @@ verus! {
             v == view_read(r.disk2_frac.val().mem, self.addr())
         }
 
-        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        proof fn validate(tracked &self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(credit => &mself.inv => inner => {
-                inner.disk.agree(&r);
+                r.agree(&inner.disk)
             });
         }
 

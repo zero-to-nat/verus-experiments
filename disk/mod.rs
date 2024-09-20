@@ -78,12 +78,14 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: ResultT, v: u8) -> bool;
-        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        proof fn validate(tracked &self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
             requires
                 self.pre(),
-                r.valid(self.id(), 1),
+                old(r).valid(self.id(), 1),
             ensures
                 self.addr() == 0 || self.addr() == 1,
+                r.valid(self.id(), 1),
+                r.val() == old(r).val(),
             opens_invariants
                 [ DISK_INV_NS ];
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
@@ -183,7 +185,7 @@ verus! {
             // Just to make sure validation works, try to invoke validate().
             let credit = create_open_invariant_credit();
             proof {
-                perm.validate(&self.frac.borrow_mut(), credit.get())
+                perm.validate(self.frac.borrow_mut(), credit.get())
             };
 
             let v = if addr == 0 { self.block0 } else { self.block1 };
