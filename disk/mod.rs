@@ -190,12 +190,7 @@ verus! {
 
             let v = if addr == 0 { self.block0 } else { self.block1 };
             let credit = create_open_invariant_credit();
-            let tracked mut result: Option<ResultT> = None;
-            proof {
-                let tracked res = perm.apply(self.frac.borrow_mut(), v, credit.get());
-                result = Some(res)
-            };
-            (v, Tracked(result.tracked_unwrap()))
+            (v, Tracked(perm.apply(self.frac.borrow_mut(), v, credit.get())))
         }
 
         pub fn write<ResultT, Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
@@ -218,16 +213,13 @@ verus! {
                 self.block1 = val
             };
             let credit = create_open_invariant_credit();
-            let tracked mut result: Option<ResultT> = None;
-            proof {
+            Tracked({
                 let write_crash = vstd::pervasive::arbitrary();
                 if write_crash {
                     self.durable = view_write(self.durable, addr, val)
                 };
-                let tracked res = perm.apply(self.frac.borrow_mut(), write_crash, credit.get());
-                result = Some(res)
-            };
-            Tracked(result.tracked_unwrap())
+                perm.apply(self.frac.borrow_mut(), write_crash, credit.get())
+            })
         }
 
         // Leftover, should really be implemented in terms of the fupd-style barrier() below
@@ -257,12 +249,7 @@ verus! {
             assert(self.durable == (self.block0, self.block1)) by { admit() };
 
             let credit = create_open_invariant_credit();
-            let tracked mut result: Option<ResultT> = None;
-            proof {
-                let tracked res = perm.apply(self.frac.borrow_mut(), credit.get());
-                result = Some(res)
-            };
-            Tracked(result.tracked_unwrap())
+            Tracked(perm.apply(self.frac.borrow_mut(), credit.get()))
         }
     }
 
