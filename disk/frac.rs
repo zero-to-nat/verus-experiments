@@ -120,16 +120,15 @@ verus! {
             FractionalResource { r }
         }
 
-        pub proof fn agree(tracked self: &mut FractionalResource<T, Total>, tracked other: &FractionalResource<T, Total>)
+        pub proof fn agree(tracked self: &FractionalResource<T, Total>, tracked other: &FractionalResource<T, Total>)
             requires
-                old(self).inv(),
+                self.inv(),
                 other.inv(),
-                old(self).id() == other.id(),
+                self.id() == other.id(),
             ensures
-                *self == *old(self),
                 self.val() == other.val(),
         {
-            self.r.validate_2(&other.r)
+            self.r.validate_2_ref(&other.r)
         }
 
         pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: FractionalResource<T, Total>)

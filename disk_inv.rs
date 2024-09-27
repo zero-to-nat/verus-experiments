@@ -174,7 +174,7 @@ verus! {
             r.app_frac.val().mem == r.app_frac.val().crash
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(credit => &mself.inv => inner => {
@@ -220,7 +220,7 @@ verus! {
             v == view_read(r.disk2_frac.val().mem, self.addr())
         }
 
-        proof fn validate(tracked &self, tracked r: &mut FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(credit => &mself.inv => inner => {
@@ -228,7 +228,7 @@ verus! {
             });
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(credit => &mself.inv => inner => {
