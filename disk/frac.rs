@@ -128,7 +128,8 @@ verus! {
             ensures
                 self.val() == other.val(),
         {
-            self.r.validate_2_ref(&other.r)
+            let tracked joined = self.r.join_shared(&other.r);
+            joined.validate()
         }
 
         pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: FractionalResource<T, Total>)
