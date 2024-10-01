@@ -1,12 +1,11 @@
 use builtin::*;
 use vstd::prelude::*;
 use vstd::invariant::*;
+use vstd::proph::*;
 
 pub mod frac;
-pub mod proph;
 
 use frac::FractionalResource;
-use proph::Prophecy;
 
 verus! {
     pub const DISK_INV_NS: u64 = 12345;
@@ -239,9 +238,9 @@ verus! {
                 let mut write_crash = true;
 
                 if addr == 0 {
-                    write_crash = (self.proph0@@ == self.block0.len()-1);
+                    write_crash = (self.proph0@ == self.block0.len()-1);
                 } else {
-                    write_crash = (self.proph1@@ == self.block1.len()-1);
+                    write_crash = (self.proph1@ == self.block1.len()-1);
                 }
 
                 if write_crash {
