@@ -8,8 +8,6 @@ pub mod frac;
 use frac::FractionalResource;
 
 verus! {
-    pub const DISK_INV_NS: u64 = 12345;
-
     pub type DiskView = (u8, u8);
 
     pub open spec fn view_write(state: DiskView, addr: u8, val: u8) -> DiskView
@@ -39,6 +37,7 @@ verus! {
     pub trait DiskWritePermission where Self: Sized {
         type Result;
 
+        spec fn namespace(&self) -> int;
         spec fn addr(&self) -> u8;
         spec fn val(&self) -> u8;
         spec fn id(&self) -> int;
@@ -56,12 +55,13 @@ verus! {
                 }),
                 self.post(result),
             opens_invariants
-                [ DISK_INV_NS ];
+                [ self.namespace() ];
     }
 
     pub trait DiskBarrierPermission where Self: Sized {
         type Result;
 
+        spec fn namespace(&self) -> int;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result) -> bool;
@@ -73,12 +73,13 @@ verus! {
             ensures
                 self.post(result),
             opens_invariants
-                [ DISK_INV_NS ];
+                [ self.namespace() ];
     }
 
     pub trait DiskReadPermission where Self: Sized {
         type Result;
 
+        spec fn namespace(&self) -> int;
         spec fn addr(&self) -> u8;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
@@ -90,7 +91,7 @@ verus! {
             ensures
                 self.addr() == 0 || self.addr() == 1,
             opens_invariants
-                [ DISK_INV_NS ];
+                [ self.namespace() ];
         proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
             requires
                 self.pre(),
@@ -99,7 +100,7 @@ verus! {
             ensures
                 self.post(result, v),
             opens_invariants
-                [ DISK_INV_NS ];
+                [ self.namespace() ];
     }
 
     pub struct Disk

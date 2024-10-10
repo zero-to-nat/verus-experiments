@@ -33,6 +33,7 @@ verus! {
     {
         type Result = FractionalResource<MemCrashView, 2>;
 
+        open spec fn namespace(&self) -> int { 0 }
         open spec fn id(&self) -> int { self.frac.id() }
         open spec fn addr(&self) -> u8 { self.a }
         open spec fn val(&self) -> u8 { self.v }
@@ -84,6 +85,7 @@ verus! {
     {
         type Result = FractionalResource<MemCrashView, 2>;
 
+        open spec fn namespace(&self) -> int { 0 }
         open spec fn id(&self) -> int { self.frac.id() }
         open spec fn addr(&self) -> u8 { 1 }
         open spec fn val(&self) -> u8 { self.v }

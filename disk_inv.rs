@@ -16,7 +16,6 @@ use disk::Disk;
 use disk::DiskReadPermission;
 use disk::DiskWritePermission;
 use disk::DiskBarrierPermission;
-use disk::DISK_INV_NS;
 
 verus! {
     pub type AbsView = u8;
@@ -81,6 +80,7 @@ verus! {
     {
         type Result = InvPermResult;
 
+        open spec fn namespace(&self) -> int { self.inv.namespace() }
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
         open spec fn addr(&self) -> u8 { self.a }
         open spec fn val(&self) -> u8 { self.v }
@@ -88,8 +88,6 @@ verus! {
         open spec fn pre(&self) -> bool {
             self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-
-            self.inv.namespace() == DISK_INV_NS &&
 
             if self.addr() == 0 {
                 self.val() <= self.disk2_frac.val().mem.1 &&
@@ -158,13 +156,12 @@ verus! {
     {
         type Result = InvPermResult;
 
+        open spec fn namespace(&self) -> int { self.inv.namespace() }
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
 
         open spec fn pre(&self) -> bool {
             self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-
-            self.inv.namespace() == DISK_INV_NS
+            self.app_frac.valid(self.inv.constant().abs_id, 1)
         }
 
         open spec fn post(&self, r: InvPermResult) -> bool {
@@ -206,13 +203,13 @@ verus! {
     {
         type Result = InvPermResult;
 
+        open spec fn namespace(&self) -> int { self.inv.namespace() }
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
         open spec fn addr(&self) -> u8 { self.a }
 
         open spec fn pre(&self) -> bool {
             self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-            self.inv.namespace() == DISK_INV_NS &&
             ( self.addr() == 0 || self.addr() == 1 )
         }
 
@@ -272,7 +269,7 @@ verus! {
             abs: app_r1,
         };
 
-        let tracked i = AtomicInvariant::<_, _, DiskInvPred>::new(inv_param, inv_st, disk::DISK_INV_NS as int);
+        let tracked i = AtomicInvariant::<_, _, DiskInvPred>::new(inv_param, inv_st, 12345);
         let tracked i = Arc::new(i);
 
         let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
