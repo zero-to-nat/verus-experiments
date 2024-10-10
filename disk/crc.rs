@@ -104,16 +104,19 @@ verus! {
             self.data@.len() == self.corruption@.len() && popcnt(self.corruption@) <= self.corruption_bits@
         }
 
-        // external_body because it's tricky to prove there exists a sequence
-        // with a suitably small popcnt() value.
-        #[verifier::external_body]
         pub fn alloc(len: u64, Ghost(max_corrupt): Ghost<nat>) -> (res: Disk)
             ensures
                 res.inv(),
                 res@.len() == len,
         {
             let ghost disk = Seq::new(len as nat, |i: int| 0);
-            let ghost corrupt = choose |s: Seq<u8>| popcnt(s) <= max_corrupt;
+
+            // prove that there exists a Seq<u8> with a suitably low popcnt value
+            assert(exists |s: Seq<u8>| #[trigger] s.len() == len && popcnt(s) <= max_corrupt) by {
+                popcnt_zeroes(len as nat);
+            };
+
+            let ghost corrupt = choose |s: Seq<u8>| #[trigger] s.len() == len && popcnt(s) <= max_corrupt;
             Disk{
                 data: Ghost(disk),
                 corruption: Ghost(corrupt),
@@ -246,15 +249,12 @@ verus! {
         decreases
             len
     {
-        if len == 0 {
-        } else {
-            let len1 = (len-1) as nat;
-            sum_zeroes(len1);
+        if len > 0 {
             let l = Seq::new(len, |i: int| 0nat);
-            let l1 = Seq::new(len1, |i: int| 0nat);
-            assert(l == l1.push(0nat));
-            l.lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
-            l1.lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
+            let l1 = Seq::new((len-1) as nat, |i: int| 0nat);
+
+            sum_zeroes(l1.len());
+            assert(l1 == l.drop_last());
         }
     }
 
