@@ -2,11 +2,6 @@ use vstd::prelude::*;
 use vstd::invariant::*;
 
 verus! {
-    trait T {
-        spec fn namespace() -> int;
-        fn f(&self) opens_invariants [ Self::namespace() ];
-    }
-
     struct P {}
     impl InvariantPredicate<(), ()> for P {
         closed spec fn inv(k: (), v: ()) -> bool { true }
@@ -16,9 +11,10 @@ verus! {
         inv: AtomicInvariant<(), (), P>,
     }
 
-    impl T for S {
+    impl S {
         spec fn namespace() -> int { 5 }
-        fn f(&self) {
+        fn f(&self) opens_invariants [ Self::namespace() ] {
+            assume(self.inv.namespace() == 5);
             open_atomic_invariant!(&self.inv => inner => {});
         }
     }
