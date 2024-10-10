@@ -171,8 +171,8 @@ verus! {
                 block1: vec![0],
                 durable: (0, 0),
                 frac: Tracked(r1),
-                proph0: Prophecy::<usize>::alloc(),
-                proph1: Prophecy::<usize>::alloc(),
+                proph0: Prophecy::<usize>::new(),
+                proph1: Prophecy::<usize>::new(),
             };
             (d, Tracked(r2))
         }
@@ -280,14 +280,14 @@ verus! {
                 self.id() == old(self).id(),
                 perm.post(result@),
         {
-            let mut proph0 = Prophecy::<usize>::alloc();
-            let mut proph1 = Prophecy::<usize>::alloc();
+            let mut proph0 = Prophecy::<usize>::new();
+            let mut proph1 = Prophecy::<usize>::new();
 
             std::mem::swap(&mut self.proph0, &mut proph0);
             std::mem::swap(&mut self.proph1, &mut proph1);
 
-            proph0.resolve(self.block0.len()-1);
-            proph1.resolve(self.block1.len()-1);
+            proph0.resolve(&(self.block0.len()-1));
+            proph1.resolve(&(self.block1.len()-1));
 
             self.block0 = vec![self.block0[self.block0.len()-1]];
             self.block1 = vec![self.block1[self.block1.len()-1]];
@@ -305,14 +305,14 @@ verus! {
             let crashidx0 = choose_usize(self.block0.len());
             let crashidx1 = choose_usize(self.block1.len());
 
-            let mut proph0 = Prophecy::<usize>::alloc();
-            let mut proph1 = Prophecy::<usize>::alloc();
+            let mut proph0 = Prophecy::<usize>::new();
+            let mut proph1 = Prophecy::<usize>::new();
 
             std::mem::swap(&mut self.proph0, &mut proph0);
             std::mem::swap(&mut self.proph1, &mut proph1);
 
-            proph0.resolve(crashidx0);
-            proph1.resolve(crashidx1);
+            proph0.resolve(&crashidx0);
+            proph1.resolve(&crashidx1);
 
             let Ghost(crash0) = Ghost(self.block0[crashidx0 as int]);
             let Ghost(crash1) = Ghost(self.block1[crashidx1 as int]);
