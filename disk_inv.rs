@@ -77,8 +77,10 @@ verus! {
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
     }
 
-    impl DiskWritePermission<InvPermResult> for InvWritePerm
+    impl DiskWritePermission for InvWritePerm
     {
+        type Result = InvPermResult;
+
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
         open spec fn addr(&self) -> u8 { self.a }
         open spec fn val(&self) -> u8 { self.v }
@@ -152,8 +154,10 @@ verus! {
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
     }
 
-    impl DiskBarrierPermission<InvPermResult> for InvBarrierPerm
+    impl DiskBarrierPermission for InvBarrierPerm
     {
+        type Result = InvPermResult;
+
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
 
         open spec fn pre(&self) -> bool {
@@ -198,8 +202,10 @@ verus! {
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
     }
 
-    impl DiskReadPermission<InvPermResult> for InvReadPerm
+    impl DiskReadPermission for InvReadPerm
     {
+        type Result = InvPermResult;
+
         open spec fn id(&self) -> int { self.inv.constant().disk_id }
         open spec fn addr(&self) -> u8 { self.a }
 
@@ -270,25 +276,25 @@ verus! {
         let tracked i = Arc::new(i);
 
         let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         assert(x0 == 0 && x1 == 0);
 
         let tracked fupd = InvWritePerm{ a: 1u8, v: 5u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let Tracked(res) = d.write::<_, InvWritePerm>(1, 5, Tracked(fupd));
+        let Tracked(res) = d.write::<InvWritePerm>(1, 5, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         assert(x0 == 0 && x1 == 5);
@@ -298,19 +304,19 @@ verus! {
         // didn't happen but the second write (below) does happen, and that
         // violates the invariant that block0 <= block1.
         let tracked fupd = InvBarrierPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let Tracked(res) = d.barrier::<_, InvBarrierPerm>(Tracked(fupd));
+        let Tracked(res) = d.barrier::<InvBarrierPerm>(Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvWritePerm{ a: 0u8, v: 2u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let Tracked(res) = d.write::<_, InvWritePerm>(0, 2, Tracked(fupd));
+        let Tracked(res) = d.write::<InvWritePerm>(0, 2, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x0, Tracked(res)) = d.read::<_, InvReadPerm>(0, Tracked(fupd));
+        let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone() };
-        let (x1, Tracked(res)) = d.read::<_, InvReadPerm>(1, Tracked(fupd));
+        let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         assert(x0 == 2 && x1 == 5);

@@ -36,13 +36,15 @@ verus! {
         pub crash: DiskView,
     }
 
-    pub trait DiskWritePermission<ResultT> where Self: Sized {
+    pub trait DiskWritePermission where Self: Sized {
+        type Result;
+
         spec fn addr(&self) -> u8;
         spec fn val(&self) -> u8;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
-        spec fn post(&self, r: ResultT) -> bool;
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
+        spec fn post(&self, r: Self::Result) -> bool;
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
@@ -57,11 +59,13 @@ verus! {
                 [ DISK_INV_NS ];
     }
 
-    pub trait DiskBarrierPermission<ResultT> where Self: Sized {
+    pub trait DiskBarrierPermission where Self: Sized {
+        type Result;
+
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
-        spec fn post(&self, r: ResultT) -> bool;
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
+        spec fn post(&self, r: Self::Result) -> bool;
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
@@ -72,11 +76,13 @@ verus! {
                 [ DISK_INV_NS ];
     }
 
-    pub trait DiskReadPermission<ResultT> where Self: Sized {
+    pub trait DiskReadPermission where Self: Sized {
+        type Result;
+
         spec fn addr(&self) -> u8;
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
-        spec fn post(&self, r: ResultT, v: u8) -> bool;
+        spec fn post(&self, r: Self::Result, v: u8) -> bool;
         proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
             requires
                 self.pre(),
@@ -85,7 +91,7 @@ verus! {
                 self.addr() == 0 || self.addr() == 1,
             opens_invariants
                 [ DISK_INV_NS ];
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: ResultT)
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
@@ -190,9 +196,9 @@ verus! {
             }
         }
 
-        pub fn read<ResultT, Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<ResultT>))
+        pub fn read<Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<Perm::Result>))
             where
-                Perm: DiskReadPermission<ResultT>
+                Perm: DiskReadPermission
             requires
                 old(self).inv(),
                 perm.pre(),
@@ -214,9 +220,9 @@ verus! {
             (v, Tracked(perm.apply(self.frac.borrow_mut(), v, credit.get())))
         }
 
-        pub fn write<ResultT, Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
+        pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Result>)
             where
-                Perm: DiskWritePermission<ResultT>
+                Perm: DiskWritePermission
             requires
                 old(self).inv(),
                 perm.pre(),
@@ -262,9 +268,9 @@ verus! {
             unimplemented!()
         }
 
-        pub fn barrier<ResultT, Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<ResultT>)
+        pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Result>)
             where
-                Perm: DiskBarrierPermission<ResultT>
+                Perm: DiskBarrierPermission
             requires
                 old(self).inv(),
                 perm.pre(),

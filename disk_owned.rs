@@ -29,8 +29,10 @@ verus! {
         pub ghost abs_post: AbsView,
     }
 
-    impl DiskWritePermission<FractionalResource<MemCrashView, 2>> for WriteFupd
+    impl DiskWritePermission for WriteFupd
     {
+        type Result = FractionalResource<MemCrashView, 2>;
+
         open spec fn id(&self) -> int { self.frac.id() }
         open spec fn addr(&self) -> u8 { self.a }
         open spec fn val(&self) -> u8 { self.v }
@@ -78,8 +80,10 @@ verus! {
         pub ghost abs: AbsView,
     }
 
-    impl DiskWritePermission<FractionalResource<MemCrashView, 2>> for WriteFupd1
+    impl DiskWritePermission for WriteFupd1
     {
+        type Result = FractionalResource<MemCrashView, 2>;
+
         open spec fn id(&self) -> int { self.frac.id() }
         open spec fn addr(&self) -> u8 { 1 }
         open spec fn val(&self) -> u8 { self.v }
@@ -121,7 +125,7 @@ verus! {
         assert(x0 == 0 && x1 == 0);
 
         let tracked fupd = WriteFupd{ a: 1u8, v: 5u8, frac: r, abs_pre: 0, abs_post: 0 };
-        let Tracked(r) = d.write::<_, WriteFupd>(1, 5, Tracked(fupd));
+        let Tracked(r) = d.write::<WriteFupd>(1, 5, Tracked(fupd));
 
         let x0 = d.read_owned(0, Tracked(&mut r));
         let x1 = d.read_owned(1, Tracked(&mut r));
@@ -129,7 +133,7 @@ verus! {
 
         // As another example, could use a different fupd to justify the write.
         let tracked fupd = WriteFupd1{ v: 7u8, frac: r, abs: 0 };
-        let Tracked(r) = d.write::<_, WriteFupd1>(1, 7, Tracked(fupd));
+        let Tracked(r) = d.write::<WriteFupd1>(1, 7, Tracked(fupd));
 
         let x0 = d.read_owned(0, Tracked(&mut r));
         let x1 = d.read_owned(1, Tracked(&mut r));
@@ -142,7 +146,7 @@ verus! {
         d.barrier_owned(Tracked(&r));
 
         let tracked fupd = WriteFupd{ a: 0u8, v: 2u8, frac: r, abs_pre: 0, abs_post: 2 };
-        let Tracked(r) = d.write::<_, WriteFupd>(0, 2, Tracked(fupd));
+        let Tracked(r) = d.write::<WriteFupd>(0, 2, Tracked(fupd));
 
         let x0 = d.read_owned(0, Tracked(&mut r));
         let x1 = d.read_owned(1, Tracked(&mut r));
