@@ -1,17 +1,22 @@
 use vstd::prelude::*;
 
 verus! {
-    pub open spec fn one_if(a: u8) -> nat {
-        if a == 0 { 0 } else { 1 }
-    }
-
+    #[verifier::inline]
     pub open spec fn popcnt_byte(a: u8) -> nat {
-        one_if(a&0x80) + one_if(a&0x40) + one_if(a&0x20) + one_if(a&0x10) +
-        one_if(a&0x08) + one_if(a&0x04) + one_if(a&0x02) + one_if(a&0x01)
+        let p0 = 1u8 & (a >> 0u8);
+        let p1 = 1u8 & (a >> 1u8);
+        let p2 = 1u8 & (a >> 2u8);
+        let p3 = 1u8 & (a >> 3u8);
+        let p4 = 1u8 & (a >> 4u8);
+        let p5 = 1u8 & (a >> 5u8);
+        let p6 = 1u8 & (a >> 6u8);
+        let p7 = 1u8 & (a >> 7u8);
+        let sum = add(p0, add(p1, add(p2, add(p3, add(p4, add(p5, add(p6, p7)))))));
+        sum as nat
     }
 
     pub open spec fn sum(l: Seq<nat>) -> nat {
-        l.fold_left(0, |s: nat, i| { s+i as nat })
+        l.fold_right(|i, s: nat| { s+i as nat }, 0)
     }
 
     pub open spec fn seq_popcnt(l: Seq<u8>) -> Seq<nat> {
@@ -229,6 +234,37 @@ verus! {
             assert(seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())) ==
                    seq_indexes(seq_popcnt(s), indexes));
         }
+    }
+
+    pub open spec fn zeroes(len: nat) -> Seq<u8> {
+        Seq::new(len, |i: int| 0)
+    }
+
+    pub proof fn sum_zeroes(len: nat)
+        ensures
+            sum(Seq::new(len, |i: int| 0nat)) == 0
+        decreases
+            len
+    {
+        if len == 0 {
+        } else {
+            let len1 = (len-1) as nat;
+            sum_zeroes(len1);
+            let l = Seq::new(len, |i: int| 0nat);
+            let l1 = Seq::new(len1, |i: int| 0nat);
+            assert(l == l1.push(0nat));
+            l.lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
+            l1.lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
+        }
+    }
+
+    pub proof fn popcnt_zeroes(len: nat)
+        ensures
+            popcnt(zeroes(len)) == 0
+    {
+        assert(popcnt_byte(0) == 0) by (bit_vector);
+        assert(zeroes(len).map_values(|v: u8| popcnt_byte(v)) == Seq::new(len, |i: int| 0nat));
+        sum_zeroes(len);
     }
 
     pub proof fn popcnt_seq_indexes(disk: Seq<u8>, addrs: Seq<int>)
