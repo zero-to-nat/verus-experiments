@@ -14,8 +14,8 @@ verus! {
         Ghost(i4): Ghost<u8>) {
     }
 
-    #[allow(unused_variables)]
-    fn main() {
+    #[no_mangle]
+    fn testfunc() {
         test1();
 
         let a0 = Ghost(0u8);
@@ -24,6 +24,10 @@ verus! {
         let a3 = Ghost(1u8);
 
         test2(a0, a1, a2, a3);
+    }
+
+    fn main() {
+        testfunc();
     }
 
 } // verus!
