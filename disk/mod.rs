@@ -184,8 +184,8 @@ verus! {
                 self.inv(),
                 f.inv(),
                 f.id() == self.id(),
-            ensures
-                result == view_read(f.val().mem, addr),
+            returns
+                view_read(f.val().mem, addr)
         {
             proof {
                 f.agree(self.frac.borrow())
