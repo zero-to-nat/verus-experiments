@@ -111,16 +111,17 @@ verus! {
         frac: Tracked<FractionalResource<MemCrashView, 2>>,
 
         // proph0/proph1 predict which value in prev0/prev1 will be durably
-        // written to disk.  An out-of-bounds value predicts block0/block1.
-        proph0: Prophecy::<usize>,
-        proph1: Prophecy::<usize>,
+        // written to disk.  If the value is not equal to any of the pending
+        // writes, that means a prediction for the first value.
+        proph0: Prophecy::<u8>,
+        proph1: Prophecy::<u8>,
     }
 
-    pub open spec fn proph_valid(p: Prophecy::<usize>, b: Vec<u8>, d: u8) -> bool {
-        if 0 <= p@ < b.len() {
-            d == b[p@ as int]
+    pub open spec fn proph_value(b: Vec<u8>, p: Prophecy::<u8>) -> u8 {
+        if b@.contains(p@) {
+            p@
         } else {
-            d == b[0]
+            b[0]
         }
     }
 
@@ -142,8 +143,8 @@ verus! {
             self.frac@.val().crash == self.durable &&
             self.frac@.val().mem == (self.block0[self.block0.len()-1], self.block1[self.block1.len()-1]) &&
             self.frac@.frac() == 1 &&
-            proph_valid(self.proph0, self.block0, self.durable.0) &&
-            proph_valid(self.proph1, self.block1, self.durable.1)
+            self.durable.0 == proph_value(self.block0, self.proph0) &&
+            self.durable.1 == proph_value(self.block1, self.proph1)
         }
 
         pub closed spec fn id(&self) -> int
@@ -172,8 +173,8 @@ verus! {
                 block1: vec![0],
                 durable: (0, 0),
                 frac: Tracked(r1),
-                proph0: Prophecy::<usize>::new(),
-                proph1: Prophecy::<usize>::new(),
+                proph0: Prophecy::<u8>::new(),
+                proph1: Prophecy::<u8>::new(),
             };
             (d, Tracked(r2))
         }
@@ -237,22 +238,35 @@ verus! {
         {
             if addr == 0 {
                 self.block0.push(val);
+                assert(self.block0@[self.block0.len() - 1] == val);
             } else {
                 self.block1.push(val);
+                assert(self.block1@[self.block1.len() - 1] == val);
             };
             let credit = create_open_invariant_credit();
             Tracked({
                 let mut write_crash = true;
 
                 if addr == 0 {
-                    write_crash = (self.proph0@ == self.block0.len()-1);
+                    write_crash = (self.proph0@ == val);
                 } else {
-                    write_crash = (self.proph1@ == self.block1.len()-1);
+                    write_crash = (self.proph1@ == val);
                 }
 
                 if write_crash {
                     self.durable = view_write(self.durable, addr, val)
                 };
+
+                if addr == 0 {
+                    vstd::seq_lib::lemma_seq_contains_after_push(old(self).block0@, val, self.proph0@);
+                    assert(self.durable.0 == proph_value(self.block0, self.proph0));
+                    assert(self.durable.1 == proph_value(self.block1, self.proph1));
+                } else {
+                    vstd::seq_lib::lemma_seq_contains_after_push(old(self).block1@, val, self.proph1@);
+                    assert(self.durable.0 == proph_value(self.block0, self.proph0));
+                    assert(self.durable.1 == proph_value(self.block1, self.proph1));
+                }
+
                 perm.apply(self.frac.borrow_mut(), write_crash, credit.get())
             })
         }
@@ -281,14 +295,14 @@ verus! {
                 self.id() == old(self).id(),
                 perm.post(result@),
         {
-            let mut proph0 = Prophecy::<usize>::new();
-            let mut proph1 = Prophecy::<usize>::new();
+            let mut proph0 = Prophecy::<u8>::new();
+            let mut proph1 = Prophecy::<u8>::new();
 
             std::mem::swap(&mut self.proph0, &mut proph0);
             std::mem::swap(&mut self.proph1, &mut proph1);
 
-            proph0.resolve(&(self.block0.len()-1));
-            proph1.resolve(&(self.block1.len()-1));
+            proph0.resolve(&self.block0[self.block0.len()-1]);
+            proph1.resolve(&self.block1[self.block1.len()-1]);
 
             self.block0 = vec![self.block0[self.block0.len()-1]];
             self.block1 = vec![self.block1[self.block1.len()-1]];
@@ -299,27 +313,23 @@ verus! {
             Tracked(perm.apply(self.frac.borrow_mut(), credit.get()))
         }
 
-        pub fn crash(&mut self)
+        pub fn crash(self)
             requires
-                old(self).inv()
+                self.inv()
         {
-            let crashidx0 = choose_usize(self.block0.len());
-            let crashidx1 = choose_usize(self.block1.len());
+            let mut mself = self;
 
-            let mut proph0 = Prophecy::<usize>::new();
-            let mut proph1 = Prophecy::<usize>::new();
+            let crashidx0 = choose_usize(mself.block0.len());
+            let crashidx1 = choose_usize(mself.block1.len());
 
-            std::mem::swap(&mut self.proph0, &mut proph0);
-            std::mem::swap(&mut self.proph1, &mut proph1);
+            let crash0 = mself.block0[crashidx0];
+            let crash1 = mself.block1[crashidx1];
 
-            proph0.resolve(&crashidx0);
-            proph1.resolve(&crashidx1);
+            mself.proph0.resolve(&crash0);
+            mself.proph1.resolve(&crash1);
 
-            let Ghost(crash0) = Ghost(self.block0[crashidx0 as int]);
-            let Ghost(crash1) = Ghost(self.block1[crashidx1 as int]);
             let Ghost(crash) = Ghost((crash0, crash1));
-
-            assert(crash == self.durable);
+            assert(crash == mself.durable);
         }
     }
 
