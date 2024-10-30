@@ -1,4 +1,6 @@
 use vstd::prelude::*;
+use vstd::seq_lib::*;
+use vstd::relations::*;
 
 verus! {
     #[verifier::inline]
@@ -160,12 +162,57 @@ verus! {
             indexes.len() > 0,
             valid_indexes(s, indexes),
         ensures
-            seq_indexes(s, indexes) == seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())
+            seq_indexes(s, indexes) == seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()),
+            valid_index(s, indexes[0]),
+            valid_indexes(s, indexes.drop_first()),
     {
         assert(valid_index(s, indexes[0]));
         assert(indexes == seq![indexes[0]] + indexes.drop_first());
         assert(seq_indexes(s, seq![indexes[0]] + indexes.drop_first()) ==
                seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()));
+    }
+
+    pub proof fn seq_indexes_last<T>(s: Seq<T>, indexes: Seq<int>)
+        requires
+            indexes.len() > 0,
+            valid_indexes(s, indexes),
+        ensures
+            seq_indexes(s, indexes) == seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]],
+            valid_index(s, indexes.last()),
+            valid_indexes(s, indexes.drop_last()),
+    {
+        assert(valid_index(s, indexes.last()));
+        assert(indexes == indexes.drop_last() + seq![indexes.last()]);
+        assert(seq_indexes(s, indexes.drop_last() + seq![indexes.last()]) ==
+               seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]]);
+    }
+
+    pub proof fn seq_indexes_permute<T>(s: Seq<T>, idx1: Seq<int>, idx2: Seq<int>)
+        requires
+            idx1.to_multiset() == idx2.to_multiset(),
+        ensures
+            seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx2).to_multiset()
+        decreases
+            idx1.len()
+    {
+        idx1.to_multiset_ensures();
+        idx2.to_multiset_ensures();
+        if idx1.len() == 0 {
+            // assert(seq_indexes(s, idx1).to_multiset().len() == 0);
+            // assert(seq_indexes(s, idx2).to_multiset().len() == 0);
+            // assert(idx2.len() == 0);
+        } else {
+            // assume(false);
+        }
+    }
+
+    pub proof fn seq_indexes_subrange<T>(s: Seq<T>, idx: Seq<int>, k: int)
+        requires
+            0 <= k <= s.len(),
+            forall |i: int| 0 <= i < idx.len() ==> 0 <= #[trigger] idx[i] < k,
+        ensures
+            seq_indexes(s, idx) =~= seq_indexes(s.subrange(0, k), idx)
+    {
     }
 
     pub open spec fn valid_index<T>(s: Seq<T>, i: int) -> bool {
@@ -174,6 +221,21 @@ verus! {
 
     pub open spec fn valid_indexes<T>(s: Seq<T>, indexes: Seq<int>) -> bool {
         forall |i: int| 0 <= i < indexes.len() ==> #[trigger] valid_index(s, indexes[i])
+    }
+
+    pub proof fn valid_indexes_permute<T>(s: Seq<T>, idx1: Seq<int>, idx2: Seq<int>)
+        requires
+            valid_indexes(s, idx1),
+            idx1.to_multiset() == idx2.to_multiset(),
+        ensures
+            valid_indexes(s, idx2)
+    {
+        assert forall |i: int| 0 <= i < idx2.len() implies #[trigger] valid_index(s, idx2[i]) by {
+            let idx = idx2[i];
+            idx1.to_multiset_ensures();
+            idx2.to_multiset_ensures();
+            assert(idx2.to_multiset().count(idx) > 0);
+        }
     }
 
     pub proof fn xor_seq_indexes(disk1: Seq<u8>, disk2: Seq<u8>, addrs: Seq<int>)
@@ -205,8 +267,26 @@ verus! {
         }
     }
 
-    // Proof TBD.
-    #[verifier::external_body]
+    pub proof fn sum_permute(s1: Seq<nat>, s2: Seq<nat>)
+        requires
+            s1.to_multiset() == s2.to_multiset()
+        ensures
+            sum(s1) == sum(s2)
+    {
+        fold_right_permutation(s1, s2, |i, s: nat| { s+i as nat }, 0)
+    }
+
+    pub proof fn sum_concat(s1: Seq<nat>, s2: Seq<nat>)
+        ensures
+            sum(s1+s2) == sum(s1) + sum(s2)
+    {
+        let s = s1+s2;
+        assert(s1 == s.subrange(0, s1.len() as int));
+        assert(s2 == s.subrange(s1.len() as int, s.len() as int));
+        s.lemma_fold_right_split(|i, s: nat| { s+i as nat }, 0, s1.len() as int);
+        s1.lemma_fold_right_commute_one(sum(s2), |i, s: nat| { s+i as nat }, 0);
+    }
+
     pub proof fn sum_seq_indexes(s: Seq<nat>, indexes: Seq<int>)
         requires
             indexes.no_duplicates(),
@@ -214,6 +294,65 @@ verus! {
         ensures
             sum(seq_indexes(s, indexes)) <= sum(s)
     {
+        indexes.lemma_sort_ensures();
+        let indexes_sorted = indexes.sort();
+        indexes.lemma_multiset_has_no_duplicates();
+        indexes_sorted.lemma_multiset_has_no_duplicates_conv();
+        valid_indexes_permute(s, indexes, indexes_sorted);
+        sum_seq_indexes_helper(s, indexes_sorted);
+        seq_indexes_permute(s, indexes, indexes_sorted);
+        sum_permute(seq_indexes(s, indexes), seq_indexes(s, indexes_sorted));
+    }
+
+    pub proof fn sum_seq_indexes_helper(s: Seq<nat>, indexes: Seq<int>)
+        requires
+            indexes.no_duplicates(),
+            valid_indexes(s, indexes),
+            sorted_by(indexes, |x: int, y: int| x <= y),
+        ensures
+            sum(seq_indexes(s, indexes)) <= sum(s)
+        decreases
+            s.len()
+    {
+        if indexes.len() > 0 {
+            let i = indexes.last();
+            assert(valid_index(s, i));
+
+            let s0 = s.subrange(0, i);
+            let s1 = s.subrange(i, s.len() as int);
+            assert(s == s0 + s1);
+
+            sum_concat(s0, s1);
+            assert(sum(s0) + sum(s1) == sum(s));
+
+            seq_indexes_last(s, indexes);
+            assert(seq_indexes(s, indexes) == seq_indexes(s, indexes.drop_last()).push(s[i]));
+            assert(sorted_by(indexes.drop_last(), |x: int, y: int| x <= y));
+
+            assert forall |j: int| 0 <= j < indexes.drop_last().len() implies #[trigger] valid_index(s0, indexes.drop_last()[j]) by {
+                let idx = indexes.drop_last()[j];
+                assert(valid_index(s, idx));
+                assert(0 <= idx);
+                assert((|x: int, y: int| x <= y)(indexes[j], indexes.last()));
+            }
+            sum_seq_indexes_helper(s0, indexes.drop_last());
+
+            assert forall |j: int| 0 <= j < indexes.drop_last().len() implies 0 <= #[trigger] indexes.drop_last()[j] < s0.len() by {
+                assert(valid_index(s0, indexes.drop_last()[j]));
+            }
+
+            seq_indexes_subrange(s, indexes.drop_last(), s0.len() as int);
+            sum_concat(seq_indexes(s, indexes.drop_last()), seq![s[i]]);
+            assert(sum(seq![s[i]]) == seq![s[i]].fold_right(|i, s: nat| { s+i as nat }, 0));
+            assert(sum(seq![s[i]]) == s[i]);
+
+            // XXX
+            //
+            assert(sum(seq_indexes(s, indexes)) == sum(seq_indexes(s, indexes.drop_last())) + sum(seq![s[i]]));
+
+            // assert(sum(seq_indexes(s, indexes)) == sum(seq_indexes(s0, indexes.drop_last())) + s[i]);
+            assert(false);
+        }
     }
 
     pub proof fn seq_popcnt_indexes(s: Seq<u8>, indexes: Seq<int>)
@@ -229,7 +368,6 @@ verus! {
         } else {
             seq_popcnt_indexes(s, indexes.drop_first());
             seq_indexes_first(s, indexes);
-            assert(valid_index(s, indexes[0]));
             assert(seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())) ==
                    seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())));
             assert(seq_popcnt(seq_indexes(s, indexes)) ==
