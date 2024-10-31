@@ -162,14 +162,10 @@ verus! {
             indexes.len() > 0,
             valid_indexes(s, indexes),
         ensures
-            seq_indexes(s, indexes) == seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()),
+            seq_indexes(s, indexes) =~= seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()),
             valid_index(s, indexes[0]),
             valid_indexes(s, indexes.drop_first()),
     {
-        assert(valid_index(s, indexes[0]));
-        assert(indexes == seq![indexes[0]] + indexes.drop_first());
-        assert(seq_indexes(s, seq![indexes[0]] + indexes.drop_first()) ==
-               seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()));
     }
 
     pub proof fn seq_indexes_last<T>(s: Seq<T>, indexes: Seq<int>)
@@ -177,32 +173,31 @@ verus! {
             indexes.len() > 0,
             valid_indexes(s, indexes),
         ensures
-            seq_indexes(s, indexes) == seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]],
+            seq_indexes(s, indexes) =~= seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]],
             valid_index(s, indexes.last()),
             valid_indexes(s, indexes.drop_last()),
     {
-        assert(valid_index(s, indexes.last()));
-        assert(indexes == indexes.drop_last() + seq![indexes.last()]);
-        assert(seq_indexes(s, indexes.drop_last() + seq![indexes.last()]) ==
-               seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]]);
     }
 
     pub proof fn seq_indexes_permute<T>(s: Seq<T>, idx1: Seq<int>, idx2: Seq<int>)
         requires
+            valid_indexes(s, idx1),
             idx1.to_multiset() == idx2.to_multiset(),
         ensures
-            seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx2).to_multiset()
+            seq_indexes(s, idx1).to_multiset() =~= seq_indexes(s, idx2).to_multiset()
         decreases
             idx1.len()
     {
+        valid_indexes_permute(s, idx1, idx2);
         idx1.to_multiset_ensures();
         idx2.to_multiset_ensures();
+        seq_indexes(s, idx1).to_multiset_ensures();
+        seq_indexes(s, idx2).to_multiset_ensures();
         if idx1.len() == 0 {
-            // assert(seq_indexes(s, idx1).to_multiset().len() == 0);
-            // assert(seq_indexes(s, idx2).to_multiset().len() == 0);
-            // assert(idx2.len() == 0);
         } else {
-            // assume(false);
+            seq_indexes_first(s, idx1);
+            // assert(seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx1.drop_first()).to_multiset().insert(s[idx1.first()]));
+            assert(false);
         }
     }
 
@@ -243,26 +238,16 @@ verus! {
             disk1.len() == disk2.len(),
             valid_indexes(disk1, addrs),
         ensures
-            xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == seq_indexes(xor(disk1, disk2), addrs)
+            xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) =~= seq_indexes(xor(disk1, disk2), addrs)
         decreases
             addrs.len()
     {
         if addrs.len() == 0 {
-            assert(xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == seq_indexes(xor(disk1, disk2), addrs))
         } else {
             xor_seq_indexes(disk1, disk2, addrs.drop_first());
-            assert(addrs == seq![addrs[0]] + addrs.drop_first());
-            assert(seq_indexes(disk1, seq![addrs[0]] + addrs.drop_first()) ==
-                   seq![disk1[addrs[0]]] + seq_indexes(disk1, addrs.drop_first()));
-            assert(seq_indexes(disk2, seq![addrs[0]] + addrs.drop_first()) ==
-                   seq![disk2[addrs[0]]] + seq_indexes(disk2, addrs.drop_first()));
-            assert(seq_indexes(xor(disk1, disk2), seq![addrs[0]] + addrs.drop_first()) ==
+            assert(addrs =~= seq![addrs[0]] + addrs.drop_first());
+            assert(seq_indexes(xor(disk1, disk2), seq![addrs[0]] + addrs.drop_first()) =~=
                    seq![xor(disk1, disk2)[addrs[0]]] + seq_indexes(xor(disk1, disk2), addrs.drop_first()));
-            assert(xor(seq![disk1[addrs[0]]] + seq_indexes(disk1, addrs.drop_first()),
-                       seq![disk2[addrs[0]]] + seq_indexes(disk2, addrs.drop_first())) ==
-                   seq![disk1[addrs[0]] ^ disk2[addrs[0]]] +
-                   xor(seq_indexes(disk1, addrs.drop_first()),
-                       seq_indexes(disk2, addrs.drop_first())));
             assert(valid_index(disk1, addrs[0]));
         }
     }
@@ -359,21 +344,16 @@ verus! {
         requires
             valid_indexes(s, indexes)
         ensures
-            seq_popcnt(seq_indexes(s, indexes)) == seq_indexes(seq_popcnt(s), indexes)
+            seq_popcnt(seq_indexes(s, indexes)) =~= seq_indexes(seq_popcnt(s), indexes)
         decreases
             indexes.len()
     {
         if indexes.len() == 0 {
-            assert(seq_popcnt(seq_indexes(s, indexes)) == seq_indexes(seq_popcnt(s), indexes))
         } else {
             seq_popcnt_indexes(s, indexes.drop_first());
             seq_indexes_first(s, indexes);
-            assert(seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())) ==
+            assert(seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())) =~=
                    seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())));
-            assert(seq_popcnt(seq_indexes(s, indexes)) ==
-                   seq_popcnt(seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first())));
-            assert(seq![popcnt_byte(s[indexes[0]])] + seq_popcnt(seq_indexes(s, indexes.drop_first())) ==
-                   seq_indexes(seq_popcnt(s), indexes));
         }
     }
 
