@@ -188,6 +188,8 @@ verus! {
         decreases
             idx1.len()
     {
+        broadcast use vstd::multiset::group_multiset_axioms;
+
         valid_indexes_permute(s, idx1, idx2);
         idx1.to_multiset_ensures();
         idx2.to_multiset_ensures();
@@ -195,9 +197,23 @@ verus! {
         seq_indexes(s, idx2).to_multiset_ensures();
         if idx1.len() == 0 {
         } else {
+            let i = idx1.first();
+            let idx1rec = idx1.remove(0);
+            assert(idx1.remove(0) == idx1.drop_first());
+            assert(idx1rec.to_multiset() == idx1.to_multiset().remove(i));
+
+            assert(idx1.to_multiset().contains(i));
+            assert(idx2.contains(i));
+            let idx2pos = idx2.index_of(i);
+            let idx2rec = idx2.remove(idx2pos);
+            idx2rec.to_multiset_ensures();
+            assert(idx2rec.to_multiset() == idx2.to_multiset().remove(i));
+
+            seq_indexes_permute(s, idx1rec, idx2rec);
             seq_indexes_first(s, idx1);
-            // assert(seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx1.drop_first()).to_multiset().insert(s[idx1.first()]));
-            assert(false);
+            assert(seq_indexes(s, idx1) == seq![s[i]] + seq_indexes(s, idx1rec));
+            assert(seq_indexes(s, idx1).to_multiset() =~= seq_indexes(s, idx1rec).to_multiset().insert(s[i]));
+            assert(seq_indexes(s, idx2).to_multiset() =~= seq_indexes(s, idx2rec).to_multiset().insert(s[i]));
         }
     }
 
@@ -272,6 +288,28 @@ verus! {
         s1.lemma_fold_right_commute_one(sum(s2), |i, s: nat| { s+i as nat }, 0);
     }
 
+    pub proof fn sum_remove(s: Seq<nat>, i: int)
+        requires
+            0 <= i < s.len()
+        ensures
+            sum(s) == s[i] + sum(s.remove(i))
+    {
+        let s1 = s.subrange(0, i);
+        let s2 = s.subrange(i, s.len() as int);
+        assert(s == s1+s2);
+
+        assert(s.remove(i) == s1 + s2.drop_first());
+
+        sum_concat(s1, s2);
+        assert(sum(s) == sum(s1) + sum(s2));
+        sum_concat(s1, s2.drop_first());
+        assert(sum(s.remove(i)) == sum(s1) + sum(s2.drop_first()));
+
+        s2.lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
+        s2.drop_first().lemma_fold_right_alt(|i, s: nat| { s+i as nat }, 0);
+        assert(sum(s2) == s2[0] + sum(s2.drop_first()));
+    }
+
     pub proof fn sum_seq_indexes(s: Seq<nat>, indexes: Seq<int>)
         requires
             indexes.no_duplicates(),
@@ -328,15 +366,21 @@ verus! {
 
             seq_indexes_subrange(s, indexes.drop_last(), s0.len() as int);
             sum_concat(seq_indexes(s, indexes.drop_last()), seq![s[i]]);
-            assert(sum(seq![s[i]]) == seq![s[i]].fold_right(|i, s: nat| { s+i as nat }, 0));
+            reveal_with_fuel(Seq::fold_right, 2);
             assert(sum(seq![s[i]]) == s[i]);
 
-            // XXX
-            //
-            assert(sum(seq_indexes(s, indexes)) == sum(seq_indexes(s, indexes.drop_last())) + sum(seq![s[i]]));
+            assert(seq_indexes(s0, indexes.drop_last()) == seq_indexes(s, indexes.drop_last()));
+            assert(seq_indexes(s, seq![i]) == seq![s[i]]);
 
-            // assert(sum(seq_indexes(s, indexes)) == sum(seq_indexes(s0, indexes.drop_last())) + s[i]);
-            assert(false);
+            assert(sum(seq_indexes(s0, indexes.drop_last())) <= sum(s0));
+            sum_remove(s1, 0);
+            assert(sum(s1) == s1[0] + sum(s1.remove(0)));
+            assert(sum(seq_indexes(s, seq![i])) <= sum(s1));
+
+            assert(seq_indexes(s0, indexes.drop_last()) + seq_indexes(s, seq![i]) == seq_indexes(s, indexes));
+
+            sum_concat(seq_indexes(s0, indexes.drop_last()), seq_indexes(s, seq![i]));
+            assert(sum(seq_indexes(s0, indexes.drop_last())) + sum(seq_indexes(s, seq![i])) == sum(seq_indexes(s, indexes)));
         }
     }
 
