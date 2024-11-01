@@ -163,8 +163,8 @@ verus! {
             indexes.len() > 0,
             valid_indexes(s, indexes),
         ensures
-            seq_indexes(s, indexes) =~= seq![s[indexes[0]]] + seq_indexes(s, indexes.drop_first()),
-            valid_index(s, indexes[0]),
+            seq_indexes(s, indexes) =~= seq![s[indexes.first()]] + seq_indexes(s, indexes.drop_first()),
+            valid_index(s, indexes.first()),
             valid_indexes(s, indexes.drop_first()),
     {
     }
@@ -177,6 +177,15 @@ verus! {
             seq_indexes(s, indexes) =~= seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]],
             valid_index(s, indexes.last()),
             valid_indexes(s, indexes.drop_last()),
+    {
+    }
+
+    pub proof fn seq_indexes_app<T>(s: Seq<T>, idx1: Seq<int>, idx2: Seq<int>)
+        requires
+            valid_indexes(s, idx1),
+            valid_indexes(s, idx2),
+        ensures
+            seq_indexes(s, idx1 + idx2) =~= seq_indexes(s, idx1) + seq_indexes(s, idx2)
     {
     }
 
@@ -235,6 +244,7 @@ verus! {
             assert(seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx1rec).to_multiset().add(Multiset::singleton(s[i])));
             assert(seq_indexes(s, idx1).to_multiset() =~= seq_indexes(s, idx1rec).to_multiset().insert(s[i]));
 
+            assert(seq_indexes(s, idx2rec) == seq_indexes(s, idx2).remove(idx2pos));
             assert(seq_indexes(s, idx2).to_multiset() =~= seq_indexes(s, idx2rec).to_multiset().insert(s[i]));
         }
     }
