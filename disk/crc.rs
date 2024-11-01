@@ -158,34 +158,33 @@ verus! {
         indexes.map_values(|a: int| s[a])
     }
 
+    // WSeq is just a wrapper for Seq that provides better notation
+    // for a multi-index operator through its spec_index().
+    pub struct WSeq<T> {
+        pub s: Seq<T>,
+    }
+
+    impl<T> WSeq<T> {
+        pub open spec fn spec_index(self, idx: Seq<int>) -> Seq<T> {
+            idx.map_values(|a: int| self.s[a])
+        }
+    }
+
+    pub open spec fn S<T>(s: Seq<T>) -> WSeq<T>
+    {
+        WSeq{
+            s: s
+        }
+    }
+
     pub proof fn seq_indexes_first<T>(s: Seq<T>, indexes: Seq<int>)
         requires
             indexes.len() > 0,
             valid_indexes(s, indexes),
         ensures
-            seq_indexes(s, indexes) =~= seq![s[indexes.first()]] + seq_indexes(s, indexes.drop_first()),
+            S(s)[indexes] =~= seq![s[indexes.first()]] + S(s)[indexes.drop_first()],
             valid_index(s, indexes.first()),
             valid_indexes(s, indexes.drop_first()),
-    {
-    }
-
-    pub proof fn seq_indexes_last<T>(s: Seq<T>, indexes: Seq<int>)
-        requires
-            indexes.len() > 0,
-            valid_indexes(s, indexes),
-        ensures
-            seq_indexes(s, indexes) =~= seq_indexes(s, indexes.drop_last()) + seq![s[indexes.last()]],
-            valid_index(s, indexes.last()),
-            valid_indexes(s, indexes.drop_last()),
-    {
-    }
-
-    pub proof fn seq_indexes_app<T>(s: Seq<T>, idx1: Seq<int>, idx2: Seq<int>)
-        requires
-            valid_indexes(s, idx1),
-            valid_indexes(s, idx2),
-        ensures
-            seq_indexes(s, idx1 + idx2) =~= seq_indexes(s, idx1) + seq_indexes(s, idx2)
     {
     }
 
@@ -194,7 +193,7 @@ verus! {
             valid_indexes(s, idx1),
             idx1.to_multiset() == idx2.to_multiset(),
         ensures
-            seq_indexes(s, idx1).to_multiset() =~= seq_indexes(s, idx2).to_multiset()
+            S(s)[idx1].to_multiset() =~= S(s)[idx2].to_multiset()
         decreases
             idx1.len()
     {
@@ -203,8 +202,8 @@ verus! {
         valid_indexes_permute(s, idx1, idx2);
         idx1.to_multiset_ensures();
         idx2.to_multiset_ensures();
-        seq_indexes(s, idx1).to_multiset_ensures();
-        seq_indexes(s, idx2).to_multiset_ensures();
+        S(s)[idx1].to_multiset_ensures();
+        S(s)[idx2].to_multiset_ensures();
         if idx1.len() == 0 {
         } else {
             let i = idx1.first();
@@ -220,7 +219,6 @@ verus! {
             assert(idx2rec.to_multiset() == idx2.to_multiset().remove(i));
 
             seq_indexes_permute(s, idx1rec, idx2rec);
-            seq_indexes_first(s, idx1);
             lemma_multiset_commutative(seq![s[i]], seq_indexes(s, idx1rec));
             lemma_seq_union_to_multiset_commutative(seq![s[i]], seq_indexes(s, idx1rec));
             lemma_multiset_commutative(seq_indexes(s, idx1rec), seq![s[i]]);
@@ -254,7 +252,7 @@ verus! {
             0 <= k <= s.len(),
             forall |i: int| 0 <= i < idx.len() ==> 0 <= #[trigger] idx[i] < k,
         ensures
-            seq_indexes(s, idx) =~= seq_indexes(s.subrange(0, k), idx)
+            S(s)[idx] =~= S(s.subrange(0, k))[idx]
     {
     }
 
@@ -286,7 +284,7 @@ verus! {
             disk1.len() == disk2.len(),
             valid_indexes(disk1, addrs),
         ensures
-            xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) =~= seq_indexes(xor(disk1, disk2), addrs)
+            xor(S(disk1)[addrs], S(disk2)[addrs]) =~= S(xor(disk1, disk2))[addrs]
         decreases
             addrs.len()
     {
@@ -347,7 +345,7 @@ verus! {
             indexes.no_duplicates(),
             valid_indexes(s, indexes),
         ensures
-            sum(seq_indexes(s, indexes)) <= sum(s)
+            sum(S(s)[indexes]) <= sum(s)
     {
         indexes.lemma_sort_ensures();
         let indexes_sorted = indexes.sort();
@@ -365,7 +363,7 @@ verus! {
             valid_indexes(s, indexes),
             sorted_by(indexes, |x: int, y: int| x <= y),
         ensures
-            sum(seq_indexes(s, indexes)) <= sum(s)
+            sum(S(s)[indexes]) <= sum(s)
         decreases
             s.len()
     {
@@ -380,7 +378,6 @@ verus! {
             sum_concat(s0, s1);
             assert(sum(s0) + sum(s1) == sum(s));
 
-            seq_indexes_last(s, indexes);
             assert(seq_indexes(s, indexes) == seq_indexes(s, indexes.drop_last()).push(s[i]));
             assert(sorted_by(indexes.drop_last(), |x: int, y: int| x <= y));
 
@@ -420,7 +417,7 @@ verus! {
         requires
             valid_indexes(s, indexes)
         ensures
-            seq_popcnt(seq_indexes(s, indexes)) =~= seq_indexes(seq_popcnt(s), indexes)
+            seq_popcnt(S(s)[indexes]) =~= S(seq_popcnt(s))[indexes]
         decreases
             indexes.len()
     {
@@ -466,7 +463,7 @@ verus! {
             addrs.no_duplicates(),
             valid_indexes(disk, addrs),
         ensures
-            popcnt(seq_indexes(disk, addrs)) <= popcnt(disk)
+            popcnt(S(disk)[addrs]) <= popcnt(disk)
     {
         assert(forall |i: int| 0 <= i < addrs.len() ==> valid_index(disk, addrs[i]) ==> #[trigger] valid_index(seq_popcnt(disk), addrs[i]));
         sum_seq_indexes(seq_popcnt(disk), addrs);
@@ -479,7 +476,7 @@ verus! {
             addrs.no_duplicates(),
             valid_indexes(disk1, addrs),
         ensures
-            hamming(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) <= hamming(disk1, disk2),
+            hamming(S(disk1)[addrs], S(disk2)[addrs]) <= hamming(disk1, disk2),
     {
         assert(hamming(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs)) == popcnt(xor(seq_indexes(disk1, addrs), seq_indexes(disk2, addrs))));
         xor_seq_indexes(disk1, disk2, addrs);
