@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 use vstd::seq_lib::*;
 use vstd::relations::*;
+use vstd::multiset::*;
 
 verus! {
     #[verifier::inline]
@@ -211,8 +212,29 @@ verus! {
 
             seq_indexes_permute(s, idx1rec, idx2rec);
             seq_indexes_first(s, idx1);
+            lemma_multiset_commutative(seq![s[i]], seq_indexes(s, idx1rec));
+            lemma_seq_union_to_multiset_commutative(seq![s[i]], seq_indexes(s, idx1rec));
+            lemma_multiset_commutative(seq_indexes(s, idx1rec), seq![s[i]]);
+
+            // XXX WTF
+            seq![s[i]].to_multiset_ensures();
+            Multiset::lemma_is_singleton(seq![s[i]].to_multiset());
+            assert(seq![s[i]].len() == 1);
+            assert(seq![s[i]].to_multiset().len() == 1);
+            assert(seq![s[i]].to_multiset().is_singleton());
+            assert(seq![s[i]].first() == s[i]);
+            assert(seq![s[i]].contains(s[i]));
+            assert(seq![s[i]].to_multiset().contains(s[i]));
+            seq![s[i]].to_multiset().lemma_is_singleton_contains_elem_equal_singleton(s[i]);
+            assert(seq![s[i]].to_multiset() =~= Multiset::singleton(s[i]));
+
             assert(seq_indexes(s, idx1) == seq![s[i]] + seq_indexes(s, idx1rec));
+            assert(seq_indexes(s, idx1).to_multiset() == (seq![s[i]] + seq_indexes(s, idx1rec)).to_multiset());
+            assert(seq_indexes(s, idx1).to_multiset() == (seq_indexes(s, idx1rec) + seq![s[i]]).to_multiset());
+            assert(seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx1rec).to_multiset().add(seq![s[i]].to_multiset()));
+            assert(seq_indexes(s, idx1).to_multiset() == seq_indexes(s, idx1rec).to_multiset().add(Multiset::singleton(s[i])));
             assert(seq_indexes(s, idx1).to_multiset() =~= seq_indexes(s, idx1rec).to_multiset().insert(s[i]));
+
             assert(seq_indexes(s, idx2).to_multiset() =~= seq_indexes(s, idx2rec).to_multiset().insert(s[i]));
         }
     }
