@@ -32,7 +32,7 @@ verus! {
     #[verifier::external_body]
     pub fn crc64(bytes: &[u8]) -> (out: Vec<u8>)
         ensures
-            out@ == spec_crc64(bytes@)
+            out@ == spec_crc64(bytes@),
     {
         Vec::new()
     }
@@ -92,14 +92,16 @@ verus! {
         pub closed spec fn corrupt(&self) -> Seq<u8> { self.corruption@ }
         pub closed spec fn corrupt_bits(&self) -> nat { self.corruption_bits@ }
 
-        pub closed spec fn inv(&self) -> bool {
-            self.data@.len() == self.corruption@.len() && popcnt(self.corruption@) <= self.corruption_bits@
+        pub open spec fn inv(&self) -> bool {
+            self@.len() == self.corrupt().len() &&
+            popcnt(self.corrupt()) <= self.corrupt_bits()
         }
 
         pub fn alloc(len: u64, Ghost(max_corrupt): Ghost<nat>) -> (res: Self)
             ensures
                 res.inv(),
                 res@.len() == len,
+                res.corrupt_bits() == max_corrupt,
         {
             let ghost disk = Seq::new(len as nat, |i: int| 0);
 
@@ -141,6 +143,18 @@ verus! {
         {
             unimplemented!()
         }
+
+        #[verifier::external_body]
+        pub fn read_range(&self, addr: u64, count: u64) -> (res: (Vec<u8>, Ghost<Seq<u8>>))
+            requires
+                self.inv(),
+                addr + count <= self@.len(),
+            ensures
+                res.1@.len() == self@.len(),
+                res.0@ == xor(self@, and(res.1@, self.corrupt())).subrange(addr as int, addr+count),
+        {
+            unimplemented!()
+        }
     }
 
     pub fn main() {
@@ -148,16 +162,26 @@ verus! {
         // assert(hamming_byte(0x00, 0x01) == 1);
         // assert(hamming(seq![0x00, 0x10, 0x08], seq![0x01, 0x10, 0x08]) == 1);
 
-        let mut d = HammingDisk::alloc(128, Ghost(0));
-        d.write(5, 123);
-        let v0 = d.read(5);
-        let v1 = d.read(5);
-        // assert(v0 == v1);
+        let mut d0 = HammingDisk::alloc(128, Ghost(0));
+        d0.write(5, 123);
+        assert(d0@[5] == 123);
+        let (v0, Ghost(mask0)) = d0.read_range(5, 1);
+        assert(v0@[0] == xor(d0@, and(mask0, d0.corrupt()))[5]);
+        proof {
+            popcnt_and(mask0, d0.corrupt());
+            xor_zeroes(d0@, and(mask0, d0.corrupt()));
+        }
+        assert(v0@[0] == d0@[5]);
 
-        // assert(corrupt0@@[5] == 0);
-        // assert(v0 == 123 ^ corrupt0@@[5]);
-
-        let v2 = d.read(5);
-        // assert(v0 == v2);
+        let mut d1 = HammingDisk::alloc(128, Ghost(1));
+        d1.write(5, 123);
+        assert(d1@[5] == 123);
+        let (v1, Ghost(mask1)) = d1.read_range(5, 1);
+        assert(v1@[0] == xor(d1@, and(mask1, d1.corrupt()))[5]);
+        // proof {
+        //     popcnt_and(mask1, d1.corrupt());
+        //     xor_zeroes(d1@, and(mask1, d1.corrupt()));
+        // }
+        // assert(v1@[0] == d1@[5]);
     }
 }

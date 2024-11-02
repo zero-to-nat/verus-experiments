@@ -217,6 +217,16 @@ verus! {
         sum(popcnt_seq(l))
     }
 
+    proof fn popcnt_remove(l: Seq<u8>, i: int)
+        requires
+            0 <= i < l.len()
+        ensures
+            popcnt(l) == popcnt_byte(l[i]) + popcnt(l.remove(i))
+    {
+        sum_remove(popcnt_seq(l), i);
+        assert(popcnt_seq(l).remove(i) == popcnt_seq(l.remove(i)));
+    }
+
     proof fn popcnt_indexes(s: Seq<u8>, idx: Seq<int>)
         requires
             valid_indexes(s, idx)
@@ -245,9 +255,13 @@ verus! {
         popcnt_indexes(s, idx);
     }
 
-    // XOR
+    // Bitwise XOR and AND for sequences
     pub open spec fn xor(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
         a.zip_with(b).map_values(|v: (u8, u8)| v.0 ^ v.1)
+    }
+
+    pub open spec fn and(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
+        a.zip_with(b).map_values(|v: (u8, u8)| v.0 & v.1)
     }
 
     pub proof fn byte_xor_xor(a: u8, b: u8)
@@ -287,6 +301,62 @@ verus! {
             assert(S(xor(s1, s2))[seq![idx.first()] + idx.drop_first()] =~=
                    seq![xor(s1, s2)[idx.first()]] + S(xor(s1, s2))[idx.drop_first()]);
             assert(valid_index(s1, idx.first()));
+        }
+    }
+
+    proof fn popcnt_byte_and(a: u8, b: u8)
+        ensures
+            popcnt_byte(a&b) <= popcnt_byte(a),
+            popcnt_byte(a&b) <= popcnt_byte(b),
+    {
+        assert(popcnt_byte(a&b) <= popcnt_byte(a)) by (bit_vector);
+        assert(popcnt_byte(a&b) <= popcnt_byte(b)) by (bit_vector);
+    }
+
+    pub proof fn popcnt_and(a: Seq<u8>, b: Seq<u8>)
+        requires
+            a.len() == b.len(),
+        ensures
+            popcnt(and(a, b)) <= popcnt(a),
+            popcnt(and(a, b)) <= popcnt(b),
+        decreases
+            a.len(),
+    {
+        if a.len() > 0 {
+            popcnt_byte_and(a[0], b[0]);
+            popcnt_and(a.drop_first(), b.drop_first());
+            popcnt_remove(a, 0);
+            popcnt_remove(b, 0);
+            popcnt_remove(and(a, b), 0);
+            assert(and(a, b).drop_first() == and(a.drop_first(), b.drop_first()));
+        }
+    }
+
+    proof fn popcnt_byte_zero(a: u8)
+        requires
+            popcnt_byte(a) == 0
+        ensures
+            a == 0
+    {
+        assert(popcnt_byte(a) == 0 ==> a == 0) by (bit_vector);
+    }
+
+    pub proof fn xor_zeroes(a: Seq<u8>, b: Seq<u8>)
+        requires
+            a.len() == b.len(),
+            popcnt(b) == 0,
+        ensures
+            xor(a, b) =~= a,
+        decreases
+            a.len()
+    {
+        if a.len() > 0 {
+            popcnt_remove(b, 0);
+            popcnt_byte_zero(b[0]);
+            let a0 = a[0];
+            assert(a0 ^ 0 == a0) by (bit_vector);
+            xor_zeroes(a.drop_first(), b.drop_first());
+            assert(a == seq![a0] + a.drop_first());
         }
     }
 
