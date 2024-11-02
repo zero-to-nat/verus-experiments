@@ -42,13 +42,12 @@ verus! {
         Vec::new()
     }
 
-    // This proof function is marked verifier::external_body to assume that all
-    // CRC-64 values are 8 bytes long.
-    #[verifier::external_body]
     pub proof fn crc64_spec_len()
         ensures
             forall |bytes| (#[trigger] spec_crc64_bytes(bytes)).len() == 8,
-    {}
+    {
+        lemma_auto_spec_u64_to_from_le_bytes();
+    }
 
     // This proof function is marked verifier::external_body to assume that the
     // CRC64 function, as captured by spec_crc64(), correctly achieves the hamming
@@ -119,9 +118,7 @@ verus! {
             let ghost disk = Seq::new(len as nat, |i: int| 0);
 
             // prove that there exists a Seq<u8> with a suitably low popcnt value
-            assert(exists |s: Seq<u8>| #[trigger] s.len() == len && popcnt(s) <= max_corrupt) by {
-                popcnt_u8_zeroes(len as nat);
-            };
+            Ghost(popcnt_u8_zeroes(len as nat));
 
             let ghost corrupt = choose |s: Seq<u8>| #[trigger] s.len() == len && popcnt(s) <= max_corrupt;
             Self{
