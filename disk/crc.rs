@@ -180,8 +180,6 @@ verus! {
         }
     }
 
-    // This is also unproven in storage_node/src/pmem/pmemspec_t.rs..
-    #[verifier::external_body]
     pub exec fn crc_equal(crc1: &[u8], crc2: &[u8]) -> bool
         requires
             crc1.len() == 8,
@@ -191,6 +189,11 @@ verus! {
     {
         let crc1_u64 = u64_from_le_bytes(crc1);
         let crc2_u64 = u64_from_le_bytes(crc2);
+        proof {
+            lemma_auto_spec_u64_to_from_le_bytes();
+            assert(spec_u64_to_le_bytes(crc1_u64) ==
+                   spec_u64_to_le_bytes(spec_u64_from_le_bytes(crc1@)));
+        };
         crc1_u64 == crc2_u64
     }
 
@@ -199,10 +202,6 @@ verus! {
     }
 
     pub fn main() {
-        // assert(popcnt(0) == 0);
-        // assert(hamming_byte(0x00, 0x01) == 1);
-        // assert(hamming(seq![0x00, 0x10, 0x08], seq![0x01, 0x10, 0x08]) == 1);
-
         let mut d0 = HammingDisk::alloc(128, Ghost(0));
         d0.write(5, 123);
         assert(d0@[5] == 123);
@@ -251,11 +250,5 @@ verus! {
             }
             assert(bufR@ == buf@);
         }
-
-        // proof {
-        //     popcnt_and(mask1, d1.corrupt());
-        //     xor_zeroes(d1@, and(mask1, d1.corrupt()));
-        // }
-        // assert(v1@[0] == d1@[5]);
     }
 }
