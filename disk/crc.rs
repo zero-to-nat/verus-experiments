@@ -128,18 +128,17 @@ verus! {
             }
         }
 
-        #[verifier::external_body]
         pub fn write(&mut self, addr: u64, val: u8)
             requires
                 old(self).inv(),
                 addr < old(self)@.len(),
             ensures
                 self.inv(),
-                self@ == old(self)@.update(addr as int, val),
+                self@ =~= old(self)@.update(addr as int, val),
                 self.corrupt() == old(self).corrupt(),
                 self.corrupt_bits() == old(self).corrupt_bits(),
         {
-            unimplemented!()
+            self.write_range(addr, vec![val].as_slice())
         }
 
         #[verifier::external_body]
@@ -156,7 +155,6 @@ verus! {
             unimplemented!()
         }
 
-        #[verifier::external_body]
         pub fn read(&self, addr: u64) -> (res: (u8, Ghost<Seq<u8>>))
             requires
                 self.inv(),
@@ -165,7 +163,8 @@ verus! {
                 res.1@.len() == self@.len(),
                 res.0 == self@[addr as int] ^ (res.1@[addr as int] & self.corrupt()[addr as int]),
         {
-            unimplemented!()
+            let (res, Ghost(mask)) = self.read_range(addr, 1);
+            (res[0], Ghost(mask))
         }
 
         #[verifier::external_body]
