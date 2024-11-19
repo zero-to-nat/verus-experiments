@@ -109,6 +109,80 @@ verus! {
             popcnt(self.corrupt()) <= self.corrupt_bits()
         }
 
+        pub open spec fn maybe_corrupted_byte(self, byte: u8, true_byte: u8, addr: int) -> bool {
+            &&& valid_index(self.corrupt(), addr)
+            &&& exists |mask: u8| byte == #[trigger] (true_byte ^ (mask & self.corrupt()[addr]))
+        }
+
+        pub proof fn maybe_corrupted_byte_popcnt(self, byte: u8, true_byte: u8, addr: int)
+            requires
+                self.maybe_corrupted_byte(byte, true_byte, addr)
+            ensures
+                popcnt_byte(byte ^ true_byte) <= popcnt_byte(self.corrupt()[addr])
+        {
+            let c = self.corrupt()[addr];
+            assert forall |mask: u8| popcnt_byte(#[trigger] (true_byte ^ (mask & c)) ^ true_byte) <= popcnt_byte(c) by {
+                byte_xor_mask_popcnt_byte_le(true_byte, mask, c);
+            };
+        }
+
+        pub open spec fn maybe_corrupted(self, bytes: Seq<u8>, true_bytes: Seq<u8>, addrs: Seq<int>) -> bool {
+            &&& bytes.len() == true_bytes.len() == addrs.len()
+            &&& forall |i: int| #![auto] 0 <= i < bytes.len() ==> self.maybe_corrupted_byte(bytes[i], true_bytes[i], addrs[i])
+        }
+
+        pub proof fn maybe_corrupted_eq(self, bytes: Seq<u8>, true_bytes: Seq<u8>, addrs: Seq<int>)
+            requires
+                self.maybe_corrupted(bytes, true_bytes, addrs),
+                popcnt(self.corrupt()) == 0,
+            ensures
+                bytes =~= true_bytes
+        {
+            assert forall |i: int| 0 <= i < bytes.len() implies bytes[i] == true_bytes[i] by {
+                popcnt_index_le(self.corrupt(), addrs[i]);
+                popcnt_byte_zero(self.corrupt()[addrs[i]]);
+                assert forall |mask: u8| (mask & 0) == 0 by {
+                    byte_and_zero(mask);
+                };
+                xor_byte_zero(true_bytes[i]);
+            };
+        }
+
+        pub proof fn maybe_corrupted_hamming(self, bytes: Seq<u8>, true_bytes: Seq<u8>, addrs: Seq<int>)
+            requires
+                self.maybe_corrupted(bytes, true_bytes, addrs),
+                addrs.no_duplicates(),
+            ensures
+                hamming(bytes, true_bytes) <= popcnt(self.corrupt())
+        {
+            assert forall |i: int| 0 <= i < bytes.len() implies #[trigger] popcnt_byte(bytes[i] ^ true_bytes[i]) <= popcnt_byte(self.corrupt()[addrs[i]]) by {
+                self.maybe_corrupted_byte_popcnt(bytes[i], true_bytes[i], addrs[i]);
+            };
+            popcnt_ext_le(xor(bytes, true_bytes), S(self.corrupt())[addrs]);
+            popcnt_indexes_le(self.corrupt(), addrs);
+        }
+
+        pub proof fn bytes_uncorrupted(self,
+                                    x_c: Seq<u8>, x: Seq<u8>, x_addrs: Seq<int>,
+                                    y_c: Seq<u8>, y: Seq<u8>, y_addrs: Seq<int>)
+            requires
+                x_c.len() == x.len(),
+                y == spec_crc64_bytes(x),
+                y_c == spec_crc64_bytes(x_c),
+
+                (x_addrs + y_addrs).no_duplicates(),
+
+                self.maybe_corrupted(x_c, x, x_addrs),
+                self.maybe_corrupted(y_c, y, y_addrs),
+
+                popcnt(self.corrupt()) < spec_crc64_hamming_bound((x+y).len()),
+            ensures
+                x == x_c
+        {
+            self.maybe_corrupted_hamming(x_c + y_c, x + y, x_addrs + y_addrs);
+            crc64_hamming_bound_valid(x_c, x, y_c, y);
+        }
+
         pub fn alloc(len: u64, Ghost(max_corrupt): Ghost<nat>) -> (res: Self)
             ensures
                 res.inv(),
@@ -178,6 +252,20 @@ verus! {
         {
             unimplemented!()
         }
+
+        #[verifier::external_body]
+        pub fn read_range2(&self, addr: u64, count: u64) -> (res: Vec<u8>)
+            requires
+                self.inv(),
+                addr + count <= self@.len(),
+            ensures
+                ({
+                    let addrs = Seq::<int>::new(count as nat, |i: int| i + addr);
+                    self.maybe_corrupted(res@, self@.subrange(addr as int, addr+count), addrs)
+                })
+        {
+            unimplemented!()
+        }
     }
 
     pub exec fn crc_equal(crc1: &[u8], crc2: &[u8]) -> bool
@@ -213,6 +301,13 @@ verus! {
         }
         assert(v0@[0] == d0@[5]);
 
+        let v0b = d0.read_range2(5, 2);
+        proof {
+            d0.maybe_corrupted_eq(v0b@, d0@.subrange(5, 7), seq![5, 6]);
+        }
+        assert(v0b@[0] == d0@[5]);
+        assert(v0b@[1] == d0@[6]);
+
         let mut d1 = HammingDisk::alloc(128, Ghost(1));
         let buf = vec![123, 124, 125, 126];
         let crc = crc64(buf.as_slice());
@@ -223,32 +318,57 @@ verus! {
         d1.write_range(20, crc.as_slice());
         assert(buf@ == d1@.subrange(10, 14));
         assert(crc@ == d1@.subrange(20, 28));
-        let (mut bufR, Ghost(mut mask1)) = d1.read_range(10, 2);
-        let (mut bufR2, Ghost(maskB2)) = d1.read_range(12, 2);
-        let (mut crcR, Ghost(maskC1)) = d1.read_range(20, 3);
-        let (mut crcR2, Ghost(maskC2)) = d1.read_range(23, 5);
-        bufR.append(&mut bufR2);
-        crcR.append(&mut crcR2);
-        proof {
-            mask1 = update_read_mask(mask1, maskB2, 12, 2);
-            mask1 = update_read_mask(mask1, maskC1, 20, 3);
-            mask1 = update_read_mask(mask1, maskC2, 23, 5);
+
+        {
+            let (mut bufR, Ghost(mut mask1)) = d1.read_range(10, 2);
+            let (mut bufR2, Ghost(maskB2)) = d1.read_range(12, 2);
+            let (mut crcR, Ghost(maskC1)) = d1.read_range(20, 3);
+            let (mut crcR2, Ghost(maskC2)) = d1.read_range(23, 5);
+            bufR.append(&mut bufR2);
+            crcR.append(&mut crcR2);
+            proof {
+                mask1 = update_read_mask(mask1, maskB2, 12, 2);
+                mask1 = update_read_mask(mask1, maskC1, 20, 3);
+                mask1 = update_read_mask(mask1, maskC2, 23, 5);
+            }
+
+            assert(bufR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(10, 14));
+            assert(crcR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(20, 28));
+
+            let crc2 = crc64(bufR.as_slice());
+            if crc_equal(crcR.as_slice(), crc2.as_slice()) {
+                proof {
+                    let buf_addrs = seq![10, 11, 12, 13];
+                    let crc_addrs = seq![20, 21, 22, 23, 24, 25, 26, 27];
+                    popcnt_and(mask1, d1.corrupt());
+                    bytes_uncorrupted(bufR@, buf@, buf_addrs,
+                                    crcR@, crc@, crc_addrs,
+                                    d1@, and(mask1, d1.corrupt()));
+                }
+                assert(bufR@ == buf@);
+            }
         }
 
-        assert(bufR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(10, 14));
-        assert(crcR@ == xor(d1@, and(mask1, d1.corrupt())).subrange(20, 28));
+        {
+            let mut bufR = d1.read_range2(10, 2);
+            let mut bufR2 = d1.read_range2(12, 2);
+            let mut crcR = d1.read_range2(20, 3);
+            let mut crcR2 = d1.read_range2(23, 5);
+            bufR.append(&mut bufR2);
+            crcR.append(&mut crcR2);
 
-        let crc2 = crc64(bufR.as_slice());
-        if crc_equal(crcR.as_slice(), crc2.as_slice()) {
-            proof {
-                let buf_addrs = seq![10, 11, 12, 13];
-                let crc_addrs = seq![20, 21, 22, 23, 24, 25, 26, 27];
-                popcnt_and(mask1, d1.corrupt());
-                bytes_uncorrupted(bufR@, buf@, buf_addrs,
-                                  crcR@, crc@, crc_addrs,
-                                  d1@, and(mask1, d1.corrupt()));
+            assert(d1.maybe_corrupted(bufR@, d1@.subrange(10, 14), seq![10, 11, 12, 13]));
+            assert(d1.maybe_corrupted(crcR@, d1@.subrange(20, 28), seq![20, 21, 22, 23, 24, 25, 26, 27]));
+
+            let crc2 = crc64(bufR.as_slice());
+            if crc_equal(crcR.as_slice(), crc2.as_slice()) {
+                proof {
+                    let buf_addrs = seq![10, 11, 12, 13];
+                    let crc_addrs = seq![20, 21, 22, 23, 24, 25, 26, 27];
+                    d1.bytes_uncorrupted(bufR@, buf@, buf_addrs, crcR@, crc@, crc_addrs);
+                }
+                assert(bufR@ == buf@);
             }
-            assert(bufR@ == buf@);
         }
     }
 }
