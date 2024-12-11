@@ -7,7 +7,61 @@ use crate::frac::*;
 
 verus!{
 
+trait AtomicIncrementerIncrementCallback: Sized {
+    type CBResult;
+
+    spec fn inv(&self) -> bool
+        ;
+
+    spec fn id(&self) -> int
+        ;
+
+    spec fn post(&self, result: &Self::CBResult) -> bool
+        ;
+
+    proof fn increment_cb(tracked self, tracked rsrc: &mut FractionalResource<usize, 2>) -> (tracked out: Self::CBResult)
+    requires
+        old(rsrc).frac() == 1,
+        old(rsrc).inv(),
+        self.inv(),
+        self.id() == old(rsrc).id()
+    ensures
+        rsrc.frac() == 1,
+        rsrc.inv(),
+        rsrc.val() == old(rsrc).val() + 1,
+        rsrc.id() == old(rsrc).id(),
+        self.post(&out),
+    ;
+}
+
+struct AtomicIncrementerInvK {
+    up_id: int,
+    down_id: int,
+}
+
+struct AtomicIncrementerInvV {
+    up_frac: FractionalResource<usize, 2>,
+    down_frac: FractionalResource<Seq<usize>, 2>,
+}
+
+struct AtomicIncrementerInvPred {
+}
+
+impl InvariantPredicate<AtomicIncrementerInvK, AtomicIncrementerInvV > for AtomicIncrementerInvPred {
+    closed spec fn inv(k: AtomicIncrementerInvK, v: AtomicIncrementerInvV) -> bool
+    {
+        &&& v.up_frac.inv()
+        &&& v.up_frac.id() == k.up_id
+        &&& v.up_frac.frac() == 1
+
+        &&& v.down_frac.inv()
+        &&& v.down_frac.id() == k.down_id
+        &&& v.down_frac.frac() == 1
+    }
+}
+
 struct AtomicIncrementer {
+    invariant: AtomicInvariant<K, FractionalResource<Seq<usize>, 2>, Pred>,
     log: SillyLog,
     caller_frac: Tracked<FractionalResource<Seq<usize>, 2>>,
 }
@@ -76,6 +130,8 @@ impl<'a> SillyLogInvReadCallback for AtomicIncrementerGetCB<'a> {
 }
 
 impl AtomicIncrementer {
+    spec fn id(&self) -> int { 7 }
+
     fn new() -> (out: Self)
     ensures
         out.inv()
@@ -97,11 +153,13 @@ impl AtomicIncrementer {
         self.caller_frac@.val().len() as usize
     }
 
-    fn increment(&mut self)
+    fn increment<CB: AtomicIncrementerIncrementCallback>(&self, cb: Tracked<CB>)
+        -> (out: Tracked<CB::CBResult>)
     requires
-        old(self).inv(),
+        cb@.inv(),
+        cb@.id() == self.id(),
     ensures
-        self.val() == old(self).val() + 1,
+        cb@.post(&out@),
     {
         let ghost old_self_val = self.val();
 
