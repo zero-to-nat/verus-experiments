@@ -16,7 +16,7 @@ struct AtomicIncrementerIncrementCB {
     caller_frac: FractionalResource<Seq<usize>, 2>,
 }
 
-impl SillyLogInvCallback for AtomicIncrementerIncrementCB {
+impl SillyLogInvAppendCallback for AtomicIncrementerIncrementCB {
     spec fn pushed_value(&self) -> usize { 1 }
 
     spec fn id(&self) -> int { self.caller_frac.id() }
@@ -46,6 +46,32 @@ impl SillyLogInvCallback for AtomicIncrementerIncrementCB {
         &&& result.inv()
         &&& result.frac() == 1
         &&& result.val() == self.caller_frac.val().push(1)
+    }
+}
+
+struct AtomicIncrementerGetCB<'a> {
+    caller_frac: &'a FractionalResource<Seq<usize>, 2>,
+}
+
+impl<'a> SillyLogInvReadCallback for AtomicIncrementerGetCB<'a> {
+    type CBResult = ();
+
+    spec fn id(&self) -> int { self.caller_frac.id() }
+
+    spec fn inv(&self) -> bool
+    {
+        &&& self.caller_frac.inv()
+        &&& self.caller_frac.frac() == 1
+    }
+
+    proof fn read_cb(tracked self, tracked rsrc: &FractionalResource<Seq<usize>, 2>, return_val: &Vec<usize>) -> (tracked out: Self::CBResult)
+    {
+        self.caller_frac.agree(rsrc);
+    }
+
+    spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
+    {
+        &&& return_val@ == self.caller_frac.val()
     }
 }
 
@@ -93,17 +119,18 @@ impl AtomicIncrementer {
     }
     
     fn get(&self) -> (out: usize)
+    requires
+        self.inv(),
     ensures
         out == self.val(),
     {
-        let snapshot = self.log.read();
+        let cb: Tracked<AtomicIncrementerGetCB> = Tracked({
+            AtomicIncrementerGetCB{caller_frac: self.caller_frac.borrow()}
+        });
+        
+        let (read_result, cb_result) = self.log.read(cb);
 
-        assert( snapshot@ == self.caller_frac@.val() ) by {
-            // TODO left off  -- need to plumb our half-frac down to
-            // SillyLog so it can ensures something about read result.
-            assume( false );
-        }
-        snapshot.len()
+        read_result.len()
     }
 }
 
@@ -131,7 +158,7 @@ struct SillyLog {
     locked_state: RwLock<SillyLogState, SillyLogPred>,
 }
 
-trait SillyLogInvCallback: Sized {
+trait SillyLogInvAppendCallback: Sized {
     type CBResult;
 
     spec fn pushed_value(&self) -> usize
@@ -161,6 +188,30 @@ trait SillyLogInvCallback: Sized {
     ;
 }
 
+trait SillyLogInvReadCallback: Sized {
+    type CBResult;
+
+    spec fn inv(&self) -> bool
+        ;
+
+    spec fn id(&self) -> int
+        ;
+
+    spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
+        ;
+
+    proof fn read_cb(tracked self, tracked rsrc: &FractionalResource<Seq<usize>, 2>, return_val: &Vec<usize>) -> (tracked out: Self::CBResult)
+    requires
+        rsrc.frac() == 1,
+        rsrc.inv(),
+        self.inv(),
+        self.id() == rsrc.id(),
+        return_val@ == rsrc.val(),
+    ensures
+        self.post(return_val, &out),
+    ;
+}
+
 impl SillyLog {
     spec fn id(&self) -> int { self.locked_state.pred().id }
 
@@ -183,7 +234,7 @@ impl SillyLog {
         (log, Tracked(caller_part))
     }
 
-    fn append<CB: SillyLogInvCallback>(&self, v: usize, cb: Tracked<CB>)
+    fn append<CB: SillyLogInvAppendCallback>(&self, v: usize, cb: Tracked<CB>)
         -> (out: Tracked<CB::CBResult>)
     requires
         cb@.pushed_value() == v,
@@ -200,12 +251,21 @@ impl SillyLog {
         cb_result
     }
 
-    fn read(&self) -> (out: Vec<usize>)
+    fn read<CB: SillyLogInvReadCallback>(&self, cb: Tracked<CB>) -> (out: (Vec<usize>, Tracked<CB::CBResult>))
+    requires
+        cb@.inv(),
+        cb@.id() == self.id(),
+    ensures
+        cb@.post(&out.0, &out.1@),
     {
         let read_handle = self.locked_state.acquire_read();
-        let result = read_handle.borrow().phy.clone();
+        let phy_result = read_handle.borrow().phy.clone();
+        let callee_frac = &read_handle.borrow().abs;
+
+        let cbresult = Tracked({ cb.get().read_cb(&callee_frac.borrow(), &phy_result) });
         read_handle.release_read();
-        result
+
+        (phy_result, cbresult)
     }
 }
 
