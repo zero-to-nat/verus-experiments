@@ -9,17 +9,22 @@ verus!{
 
 struct AtomicIncrementer {
     log: SillyLog,
-    caller_frac: Tracked<FractionalResource<Seq<i64>, 2>>,
+    caller_frac: Tracked<FractionalResource<Seq<usize>, 2>>,
 }
 
 struct AtomicIncrementerIncrementCB {
-    caller_frac: FractionalResource<Seq<i64>, 2>,
+    caller_frac: FractionalResource<Seq<usize>, 2>,
 }
 
 impl SillyLogInvCallback for AtomicIncrementerIncrementCB {
-    spec fn pushed_value(&self) -> i64 { 1 }
+    spec fn pushed_value(&self) -> usize { 1 }
 
     spec fn id(&self) -> int { self.caller_frac.id() }
+
+    spec fn done(&self, orig: AtomicIncrementerIncrementCB) -> bool
+    {
+        self.caller_frac.val() == orig.caller_frac.val().push(1)
+    }
 
     spec fn inv(&self) -> bool
     {
@@ -27,7 +32,7 @@ impl SillyLogInvCallback for AtomicIncrementerIncrementCB {
         &&& self.caller_frac.frac() == 1
     }
 
-    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<i64>, 2>)
+    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
     {
         let tracked mut local_frac = FractionalResource::default();
         tracked_swap(&mut self.caller_frac, &mut local_frac);
@@ -55,35 +60,57 @@ impl AtomicIncrementer {
         &&& self.caller_frac@.inv()
         &&& self.caller_frac@.frac() == 1
         &&& self.caller_frac@.id() == self.log.id()
+//         &&& self.caller_frac@.val().len() <= usize::MAX
+    }
+
+    spec fn val(&self) -> usize
+    {
+        self.caller_frac@.val().len() as usize
     }
 
     fn increment(&mut self)
     requires
         old(self).inv(),
+    ensures
+        self.val() == old(self).val() + 1,
     {
+        let ghost old_self_val = self.val();
+
         let mut cb: Tracked<AtomicIncrementerIncrementCB> = Tracked({
             let tracked mut local_frac = FractionalResource::default();
             tracked_swap(self.caller_frac.borrow_mut(), &mut local_frac);
             AtomicIncrementerIncrementCB{caller_frac: local_frac}
         });
 
-        assert( cb@.caller_frac.inv() );
+        let ghost pre_cb = cb@;
+
         self.log.append(1, &mut cb);
+
+        assume( pre_cb.caller_frac.val().len() < 100 ); // TODO avoid physical sie clipping issues with long log
+
         self.caller_frac = Tracked(cb.get().caller_frac);
     }
     
-    fn get(&self) -> i64
+    fn get(&self) -> (out: usize)
+    ensures
+        out == self.val(),
     {
         let snapshot = self.log.read();
-        snapshot.len() as i64
+
+        assert( snapshot@ == self.caller_frac@.val() ) by {
+            // TODO left off  -- need to plumb our half-frac down to
+            // SillyLog so it can ensures something about read result.
+            assume( false );
+        }
+        snapshot.len()
     }
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 struct SillyLogState {
-    phy: Vec<i64>,
-    abs: Tracked<FractionalResource<Seq<i64>, 2>>,
+    phy: Vec<usize>,
+    abs: Tracked<FractionalResource<Seq<usize>, 2>>,
 }
 
 struct SillyLogPred {
@@ -104,7 +131,7 @@ struct SillyLog {
 }
 
 trait SillyLogInvCallback: Sized {
-    spec fn pushed_value(&self) -> i64
+    spec fn pushed_value(&self) -> usize
         ;
 
     spec fn inv(&self) -> bool
@@ -113,7 +140,10 @@ trait SillyLogInvCallback: Sized {
     spec fn id(&self) -> int
         ;
 
-    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<i64>, 2>)
+    spec fn done(&self, orig: Self) -> bool
+        ;
+
+    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
     requires
         old(rsrc).frac() == 1,
         old(rsrc).inv(),
@@ -126,15 +156,16 @@ trait SillyLogInvCallback: Sized {
         // stupid stuff that makes us sad
         self.id() == old(self).id(),
         rsrc.id() == old(rsrc).id(),
+        self.done(*old(self)),
     ;
 }
 
 impl SillyLog {
     spec fn id(&self) -> int { self.locked_state.pred().id }
 
-    fn new() -> (out: (Self, Tracked<FractionalResource<Seq<i64>, 2>>))
+    fn new() -> (out: (Self, Tracked<FractionalResource<Seq<usize>, 2>>))
     ensures
-        out.1@.val() == Seq::<i64>::empty(),
+        out.1@.val() == Seq::<usize>::empty(),
         out.1@.inv(),
         out.1@.frac() == 1,
         out.1@.id() == out.0.id(),
@@ -151,11 +182,13 @@ impl SillyLog {
         (log, Tracked(caller_part))
     }
 
-    fn append<CB: SillyLogInvCallback>(&self, v: i64, cb: &mut Tracked<CB>)
+    fn append<CB: SillyLogInvCallback>(&self, v: usize, cb: &mut Tracked<CB>)
     requires
         old(cb)@.pushed_value() == v,
         old(cb)@.inv(),
         old(cb)@.id() == self.id(),
+    ensures
+        cb@.done(old(cb)@),
     {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
         let ghost old_state = state.abs@.val();
@@ -167,7 +200,7 @@ impl SillyLog {
         lock_handle.release_write(state);
     }
 
-    fn read(&self) -> Vec<i64>
+    fn read(&self) -> (out: Vec<usize>)
     {
         let read_handle = self.locked_state.acquire_read();
         let result = read_handle.borrow().phy.clone();
