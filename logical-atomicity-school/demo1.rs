@@ -97,6 +97,7 @@ struct AtomicIncrementer {
 struct AtomicIncrementerIncrementCB<'a, UpCB: AtomicIncrementerIncrementCallback> {
     invariant: &'a Tracked<AtomicInvariant<AtomicIncrementerInvK, AtomicIncrementerInvV, AtomicIncrementerInvPred>>,
     up_cb: UpCB,
+    tracked credit: OpenInvariantCredit,
 }
 
 impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogInvAppendCallback for AtomicIncrementerIncrementCB<'a, UpCB> {
@@ -118,12 +119,11 @@ impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogInvAppendCallback for
 
     proof fn append_cb(
         tracked self,
-        tracked credit: OpenInvariantCredit,
         tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
     -> tracked Self::CBResult
     {
         let tracked mut cb_result;
-        open_atomic_invariant!(credit => &self.invariant.borrow() => inner_val => {
+        open_atomic_invariant!(self.credit => &self.invariant.borrow() => inner_val => {
             rsrc.combine_mut(inner_val.down_frac);
             let new_v = rsrc.val().push(1);
             rsrc.update_mut(new_v);
@@ -143,6 +143,7 @@ impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogInvAppendCallback for
 struct AtomicIncrementerGetCB<'a, UpCB: AtomicIncrementerGetCallback> {
     invariant: &'a Tracked<AtomicInvariant<AtomicIncrementerInvK, AtomicIncrementerInvV, AtomicIncrementerInvPred>>,
     up_cb: UpCB,
+    tracked credit: OpenInvariantCredit,
 }
 
 impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogInvReadCallback for AtomicIncrementerGetCB<'a, UpCB> {
@@ -162,13 +163,12 @@ impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogInvReadCallback for AtomicI
 
     proof fn read_cb(
         tracked self,
-        tracked credit: OpenInvariantCredit,
         tracked rsrc: &FractionalResource<Seq<usize>, 2>,
         return_val: &Vec<usize>)
     -> tracked Self::CBResult
     {
         let tracked mut cb_result;
-        open_atomic_invariant!(credit => &self.invariant.borrow() => inner_val => {
+        open_atomic_invariant!(self.credit => &self.invariant.borrow() => inner_val => {
             inner_val.down_frac.agree(rsrc);
             cb_result = self.up_cb.get_cb(/* missing credit*/ &mut inner_val.up_frac, return_val.len());
         });
@@ -218,7 +218,8 @@ impl AtomicIncrementer {
     ensures
         up_cb@.post(&out@),
     {
-        let down_cb:Tracked<AtomicIncrementerIncrementCB<CB>> = Tracked(AtomicIncrementerIncrementCB{invariant: &self.invariant, up_cb: up_cb.get()});
+        let open_invariant_credit = create_open_invariant_credit();
+        let down_cb:Tracked<AtomicIncrementerIncrementCB<CB>> = Tracked(AtomicIncrementerIncrementCB{invariant: &self.invariant, up_cb: up_cb.get(), credit: open_invariant_credit.get() });
 
         self.log.append(1, down_cb)
     }
@@ -232,7 +233,8 @@ impl AtomicIncrementer {
     ensures
         up_cb@.post(out.0, out.1@),
     {
-        let down_cb:Tracked<AtomicIncrementerGetCB<CB>> = Tracked(AtomicIncrementerGetCB{invariant: &self.invariant, up_cb: up_cb.get()});
+        let open_invariant_credit = create_open_invariant_credit();
+        let down_cb:Tracked<AtomicIncrementerGetCB<CB>> = Tracked(AtomicIncrementerGetCB{invariant: &self.invariant, up_cb: up_cb.get(), credit: open_invariant_credit.get()});
 
         let (down_return_val, down_cb_result) = self.log.read(down_cb);
         (down_return_val.len(), down_cb_result)
@@ -283,7 +285,6 @@ trait SillyLogInvAppendCallback: Sized {
 
     proof fn append_cb(
         tracked self,
-        tracked credit: OpenInvariantCredit,
         tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
     -> (tracked out: Self::CBResult)
     requires
@@ -318,7 +319,6 @@ trait SillyLogInvReadCallback: Sized {
 
     proof fn read_cb(
         tracked self,
-        tracked credit: OpenInvariantCredit,
         tracked rsrc: &FractionalResource<Seq<usize>, 2>,
         return_val: &Vec<usize>)
     -> (tracked out: Self::CBResult)
@@ -368,8 +368,7 @@ impl SillyLog {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
         let ghost old_state = state.abs@.val();
         state.phy.push(v);
-        let open_invariant_credit = create_open_invariant_credit();
-        let cb_result = Tracked( cb.get().append_cb(open_invariant_credit.get(), state.abs.borrow_mut()) );
+        let cb_result = Tracked( cb.get().append_cb(state.abs.borrow_mut()) );
         lock_handle.release_write(state);
         cb_result
     }
@@ -386,9 +385,7 @@ impl SillyLog {
         let phy_result = read_handle.borrow().phy.clone();
         let callee_frac = &read_handle.borrow().abs;
 
-        let open_invariant_credit = create_open_invariant_credit();
-        let cbresult = Tracked({ cb.get().read_cb(
-                open_invariant_credit.get(), &callee_frac.borrow(), &phy_result) });
+        let cbresult = Tracked({ cb.get().read_cb(&callee_frac.borrow(), &phy_result) });
         read_handle.release_read();
 
         (phy_result, cbresult)
