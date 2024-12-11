@@ -43,7 +43,7 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
@@ -65,7 +65,7 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
@@ -92,7 +92,7 @@ verus! {
                 self.addr() == 0 || self.addr() == 1,
             opens_invariants
                 [ self.namespace() ];
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8, tracked credit: OpenInvariantCredit) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
@@ -218,8 +218,7 @@ verus! {
             };
 
             let v = if addr == 0 { self.block0[self.block0.len()-1] } else { self.block1[self.block1.len()-1] };
-            let credit = create_open_invariant_credit();
-            (v, Tracked(perm.apply(self.frac.borrow_mut(), v, credit.get())))
+            (v, Tracked(perm.apply(self.frac.borrow_mut(), v)))
         }
 
         pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Result>)
@@ -243,7 +242,6 @@ verus! {
                 self.block1.push(val);
                 assert(self.block1@[self.block1.len() - 1] == val);
             };
-            let credit = create_open_invariant_credit();
             Tracked({
                 let mut write_crash = true;
 
@@ -267,7 +265,7 @@ verus! {
                     assert(self.durable.1 == proph_value(self.block1, self.proph1));
                 }
 
-                perm.apply(self.frac.borrow_mut(), write_crash, credit.get())
+                perm.apply(self.frac.borrow_mut(), write_crash)
             })
         }
 
@@ -308,9 +306,7 @@ verus! {
             self.block1 = vec![self.block1[self.block1.len()-1]];
 
             assert(self.durable == (self.block0[0], self.block1[0]));
-
-            let credit = create_open_invariant_credit();
-            Tracked(perm.apply(self.frac.borrow_mut(), credit.get()))
+            Tracked(perm.apply(self.frac.borrow_mut()))
         }
 
         pub fn crash(self)

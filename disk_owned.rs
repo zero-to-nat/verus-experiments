@@ -1,6 +1,5 @@
 use builtin::*;
 use vstd::prelude::*;
-use vstd::invariant::*;
 
 mod disk;
 
@@ -63,7 +62,7 @@ verus! {
               abs_inv(self.abs_post, r.val().crash) )
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
             r.combine_mut(self.frac);
             r.update_mut(MemCrashView{
@@ -107,7 +106,7 @@ verus! {
             abs_inv(self.abs, r.val().crash)
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: FractionalResource<MemCrashView, 2>)
         {
             r.combine_mut(self.frac);
             r.update_mut(MemCrashView{
