@@ -113,7 +113,7 @@ verus! {
         proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool, tracked credit: OpenInvariantCredit) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
-            let tracked mut ires: Option<InvPermResult> = None;
+            let tracked mut ires;
             open_atomic_invariant!(credit => &mself.inv => inner => {
                 r.combine_mut(inner.disk);
                 r.update_mut(MemCrashView{
@@ -135,13 +135,13 @@ verus! {
                     inner.abs = mself.app_frac.split_mut(1)
                 };
 
-                ires = Some(InvPermResult{
+                ires = InvPermResult{
                     disk2_frac: mself.disk2_frac,
                     app_frac: mself.app_frac,
-                })
+                }
             });
 
-            ires.tracked_unwrap()
+            ires
         }
     }
 
