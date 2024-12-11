@@ -21,28 +21,31 @@ impl SillyLogInvCallback for AtomicIncrementerIncrementCB {
 
     spec fn id(&self) -> int { self.caller_frac.id() }
 
-    spec fn done(&self, orig: AtomicIncrementerIncrementCB) -> bool
-    {
-        self.caller_frac.val() == orig.caller_frac.val().push(1)
-    }
-
     spec fn inv(&self) -> bool
     {
         &&& self.caller_frac.inv()
         &&& self.caller_frac.frac() == 1
     }
 
-    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
+    proof fn append_cb(tracked self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>) -> tracked Self::CBResult
     {
-        let tracked mut local_frac = FractionalResource::default();
-        tracked_swap(&mut self.caller_frac, &mut local_frac);
-
-        rsrc.combine_mut(local_frac);
+        rsrc.combine_mut(self.caller_frac);
 
         let new_v = rsrc.val().push(1);
         rsrc.update_mut(new_v);
 
-        self.caller_frac = rsrc.split_mut(1);
+        let tracked caller_frac = rsrc.split_mut(1);
+        caller_frac
+    }
+
+    type CBResult = FractionalResource<Seq<usize>, 2>;
+
+    spec fn post(&self, result: &Self::CBResult) -> bool
+    {
+        &&& result.id() == self.id()
+        &&& result.inv()
+        &&& result.frac() == 1
+        &&& result.val() == self.caller_frac.val().push(1)
     }
 }
 
@@ -84,11 +87,9 @@ impl AtomicIncrementer {
 
         let ghost pre_cb = cb@;
 
-        self.log.append(1, &mut cb);
+        self.caller_frac = self.log.append(1, cb);
 
         assume( pre_cb.caller_frac.val().len() < 100 ); // TODO avoid physical sie clipping issues with long log
-
-        self.caller_frac = Tracked(cb.get().caller_frac);
     }
     
     fn get(&self) -> (out: usize)
@@ -131,6 +132,8 @@ struct SillyLog {
 }
 
 trait SillyLogInvCallback: Sized {
+    type CBResult;
+
     spec fn pushed_value(&self) -> usize
         ;
 
@@ -140,23 +143,21 @@ trait SillyLogInvCallback: Sized {
     spec fn id(&self) -> int
         ;
 
-    spec fn done(&self, orig: Self) -> bool
+    spec fn post(&self, result: &Self::CBResult) -> bool
         ;
 
-    proof fn append_cb(tracked &mut self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
+    proof fn append_cb(tracked self, tracked rsrc: &mut FractionalResource<Seq<usize>, 2>) -> (tracked out: Self::CBResult)
     requires
         old(rsrc).frac() == 1,
         old(rsrc).inv(),
-        old(self).inv(),
-        old(self).id() == old(rsrc).id()
+        self.inv(),
+        self.id() == old(rsrc).id()
     ensures
         rsrc.frac() == 1,
         rsrc.inv(),
-        rsrc.val() == old(rsrc).val().push(old(self).pushed_value()),
-        // stupid stuff that makes us sad
-        self.id() == old(self).id(),
+        rsrc.val() == old(rsrc).val().push(self.pushed_value()),
+        self.post(&out),
         rsrc.id() == old(rsrc).id(),
-        self.done(*old(self)),
     ;
 }
 
@@ -182,22 +183,21 @@ impl SillyLog {
         (log, Tracked(caller_part))
     }
 
-    fn append<CB: SillyLogInvCallback>(&self, v: usize, cb: &mut Tracked<CB>)
+    fn append<CB: SillyLogInvCallback>(&self, v: usize, cb: Tracked<CB>)
+        -> (out: Tracked<CB::CBResult>)
     requires
-        old(cb)@.pushed_value() == v,
-        old(cb)@.inv(),
-        old(cb)@.id() == self.id(),
+        cb@.pushed_value() == v,
+        cb@.inv(),
+        cb@.id() == self.id(),
     ensures
-        cb@.done(old(cb)@),
+        cb@.post(&out@),
     {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
         let ghost old_state = state.abs@.val();
         state.phy.push(v);
-        proof {
-            cb.borrow_mut().append_cb(state.abs.borrow_mut());
-        }
-        assert( self.locked_state.pred().inv(state) );
+        let cb_result = Tracked({ cb.get().append_cb(state.abs.borrow_mut()) });
         lock_handle.release_write(state);
+        cb_result
     }
 
     fn read(&self) -> (out: Vec<usize>)
