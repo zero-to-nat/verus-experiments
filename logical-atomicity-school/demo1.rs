@@ -2,6 +2,9 @@ use builtin::*;
 use vstd::prelude::*;
 use vstd::rwlock::*;
 use vstd::modes::*;
+use vstd::invariant::*;
+use std::sync::Arc;
+
 mod frac;
 use crate::frac::*;
 
@@ -61,9 +64,9 @@ impl InvariantPredicate<AtomicIncrementerInvK, AtomicIncrementerInvV > for Atomi
 }
 
 struct AtomicIncrementer {
-    invariant: AtomicInvariant<K, FractionalResource<Seq<usize>, 2>, Pred>,
+    // Arc vs Tracked?
+    invariant: Tracked<AtomicInvariant<AtomicIncrementerInvK, AtomicIncrementerInvV, AtomicIncrementerInvPred>>,
     log: SillyLog,
-    caller_frac: Tracked<FractionalResource<Seq<usize>, 2>>,
 }
 
 struct AtomicIncrementerIncrementCB {
@@ -132,20 +135,29 @@ impl<'a> SillyLogInvReadCallback for AtomicIncrementerGetCB<'a> {
 impl AtomicIncrementer {
     spec fn id(&self) -> int { 7 }
 
-    fn new() -> (out: Self)
+    fn new() -> (out: (Self, Tracked<FractionalResource<usize, 2>>))
     ensures
-        out.inv()
+        out.0.inv(),
     {
-        let (log, caller_frac) = SillyLog::new();
-        AtomicIncrementer{ log, caller_frac }
+        let (log, down_frac) = SillyLog::new();
+        let tracked(up_frac, api_frac) = FractionalResource::alloc(0).split(1);
+
+        let ghost inv_k = AtomicIncrementerInvK{up_id: up_frac.id(), down_id: log.id()};
+        let tracked inv_v = AtomicIncrementerInvV{up_frac, down_frac: down_frac.get()};
+        let tracked inv = AtomicInvariant::<_,_,AtomicIncrementerInvPred>::new(inv_k, inv_v, 12345);
+        assert(AtomicIncrementerInvPred::inv(inv_k, inv_v));
+
+        let result = AtomicIncrementer{invariant: Tracked(inv), log: log};
+        (result, Tracked(api_frac))
     }
 
     spec fn inv(&self) -> bool
     {
-        &&& self.caller_frac@.inv()
-        &&& self.caller_frac@.frac() == 1
-        &&& self.caller_frac@.id() == self.log.id()
-//         &&& self.caller_frac@.val().len() <= usize::MAX
+        &&& self.invariant@.constant().down_id == self.log.id()
+        // &&& self.caller_frac@.inv()
+        // &&& self.caller_frac@.frac() == 1
+        // &&& self.caller_frac@.id() == self.log.id()
+        // &&& self.caller_frac@.val().len() <= usize::MAX
     }
 
     spec fn val(&self) -> usize
@@ -153,43 +165,43 @@ impl AtomicIncrementer {
         self.caller_frac@.val().len() as usize
     }
 
-    fn increment<CB: AtomicIncrementerIncrementCallback>(&self, cb: Tracked<CB>)
-        -> (out: Tracked<CB::CBResult>)
-    requires
-        cb@.inv(),
-        cb@.id() == self.id(),
-    ensures
-        cb@.post(&out@),
-    {
-        let ghost old_self_val = self.val();
+//     fn increment<CB: AtomicIncrementerIncrementCallback>(&self, cb: Tracked<CB>)
+//         -> (out: Tracked<CB::CBResult>)
+//     requires
+//         cb@.inv(),
+//         cb@.id() == self.id(),
+//     ensures
+//         cb@.post(&out@),
+//     {
+//         let ghost old_self_val = self.val();
 
-        let mut cb: Tracked<AtomicIncrementerIncrementCB> = Tracked({
-            let tracked mut local_frac = FractionalResource::default();
-            tracked_swap(self.caller_frac.borrow_mut(), &mut local_frac);
-            AtomicIncrementerIncrementCB{caller_frac: local_frac}
-        });
+//         let mut cb: Tracked<AtomicIncrementerIncrementCB> = Tracked({
+//             let tracked mut local_frac = FractionalResource::default();
+//             tracked_swap(self.caller_frac.borrow_mut(), &mut local_frac);
+//             AtomicIncrementerIncrementCB{caller_frac: local_frac}
+//         });
 
-        let ghost pre_cb = cb@;
+//         let ghost pre_cb = cb@;
 
-        self.caller_frac = self.log.append(1, cb);
+//         self.caller_frac = self.log.append(1, cb);
 
-        assume( pre_cb.caller_frac.val().len() < 100 ); // TODO avoid physical sie clipping issues with long log
-    }
+//         assume( pre_cb.caller_frac.val().len() < 100 ); // TODO avoid physical sie clipping issues with long log
+//     }
     
-    fn get(&self) -> (out: usize)
-    requires
-        self.inv(),
-    ensures
-        out == self.val(),
-    {
-        let cb: Tracked<AtomicIncrementerGetCB> = Tracked({
-            AtomicIncrementerGetCB{caller_frac: self.caller_frac.borrow()}
-        });
+//     fn get(&self) -> (out: usize)
+//     requires
+//         self.inv(),
+//     ensures
+//         out == self.val(),
+//     {
+//         let cb: Tracked<AtomicIncrementerGetCB> = Tracked({
+//             AtomicIncrementerGetCB{caller_frac: self.caller_frac.borrow()}
+//         });
         
-        let (read_result, cb_result) = self.log.read(cb);
+//         let (read_result, cb_result) = self.log.read(cb);
 
-        read_result.len()
-    }
+//         read_result.len()
+//     }
 }
 
 //////////////////////////////////////////////////////////////////////////////
