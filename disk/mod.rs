@@ -152,7 +152,7 @@ verus! {
             self.frac@.id()
         }
 
-        pub fn alloc() -> (res: (Disk, Tracked<FractionalResource::<MemCrashView, 2>>))
+        pub fn new() -> (res: (Disk, Tracked<FractionalResource::<MemCrashView, 2>>))
             requires
                 true,
             ensures
@@ -163,7 +163,7 @@ verus! {
                     crash: (0, 0),
                 }),
         {
-            let tracked r = FractionalResource::<MemCrashView, 2>::alloc(MemCrashView{
+            let tracked r = FractionalResource::<MemCrashView, 2>::new(MemCrashView{
                 mem: (0, 0),
                 crash: (0, 0),
             });
@@ -335,7 +335,7 @@ verus! {
 
     fn main()
     {
-        let (d, Tracked(r)) = Disk::alloc();
+        let (d, Tracked(r)) = Disk::new();
         let mut d = d;
 
         let x0 = d.read_owned(0, Tracked(&mut r));

@@ -249,12 +249,12 @@ verus! {
 
     fn main()
     {
-        let (mut d, Tracked(r)) = Disk::alloc();
+        let (mut d, Tracked(r)) = Disk::new();
 
-        let tracked app_r = FractionalResource::<AbsPair, 2>::alloc(AbsPair{ mem: 0, crash: 0 });
+        let tracked app_r = FractionalResource::<AbsPair, 2>::new(AbsPair{ mem: 0, crash: 0 });
         let tracked (app_r, app_r1) = app_r.split(1);
 
-        let tracked disk_r = FractionalResource::<MemCrashView, 2>::alloc(r.val());
+        let tracked disk_r = FractionalResource::<MemCrashView, 2>::new(r.val());
         let tracked (disk_r, disk_r1) = disk_r.split(1);
 
         let ghost inv_param = DiskInvParam{

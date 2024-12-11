@@ -120,7 +120,7 @@ verus! {
 
     fn main()
     {
-        let (mut d, Tracked(r)) = Disk::alloc();
+        let (mut d, Tracked(r)) = Disk::new();
 
         let x0 = d.read_owned(0, Tracked(&mut r));
         let x1 = d.read_owned(1, Tracked(&mut r));
