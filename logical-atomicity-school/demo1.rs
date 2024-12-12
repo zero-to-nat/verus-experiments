@@ -51,6 +51,9 @@ trait AtomicIncrementerGetCallback: Sized {
     spec fn id(&self) -> int
         ;
 
+    spec fn inv_namespace(&self) -> int
+        ;
+
     spec fn post(&self, return_val: usize, result: Self::CBResult) -> bool
         ;
 
@@ -63,6 +66,7 @@ trait AtomicIncrementerGetCallback: Sized {
         return_val == rsrc.val(),
     ensures
         self.post(return_val, out),
+    opens_invariants [ self.inv_namespace() ]
     ;
 }
 
@@ -164,10 +168,13 @@ impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogInvReadCallback for AtomicI
 
     spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
 
+    spec fn other_namespace(&self) -> int { self.up_cb.inv_namespace() }
+
     spec fn inv(&self) -> bool
     {
         &&& self.up_cb.inv()
         &&& self.invariant@.constant().up_id == self.up_cb.id()
+        &&& self.up_cb.inv_namespace() != self.inv_namespace()
     }
 
     proof fn read_cb(
@@ -248,6 +255,7 @@ impl AtomicIncrementer {
         self.inv(),
         up_cb@.inv(),
         up_cb@.id() == self.id(),
+        up_cb@.inv_namespace() != self.inv_namespace(),
     ensures
         up_cb@.post(out.0, out.1@),
     {
@@ -335,6 +343,9 @@ trait SillyLogInvReadCallback: Sized {
     spec fn inv_namespace(&self) -> int
         ;
 
+    spec fn other_namespace(&self) -> int
+        ;
+
     spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
         ;
 
@@ -351,7 +362,7 @@ trait SillyLogInvReadCallback: Sized {
         return_val@ == rsrc.val(),
     ensures
         self.post(return_val, &out),
-    opens_invariants [ self.inv_namespace() ]
+    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
     ;
 }
 
@@ -450,100 +461,6 @@ impl InvariantPredicate<MainInvK, MainInvV> for MainInvPred {
     }
 }
 
-struct Main {
-    invariant: Tracked<AtomicInvariant<MainInvK, MainInvV, MainInvPred>>,
-    incrementer: AtomicIncrementer,
-}
-
-impl Main {
-    spec fn inv(self) -> bool
-    {
-        &&& self.incrementer.inv()
-        &&& self.invariant@.constant().thread_rsrc_ids.dom() == set![ 0usize, 1usize ]
-        &&& self.invariant@.constant().down_id == self.incrementer.id()
-        &&& self.inv_namespace() != self.incrementer.inv_namespace()
-    }
-
-    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
-
-    fn new() -> (out: (Self, Tracked<FractionalResource<usize, 2>>, Tracked<FractionalResource<usize, 2>>))
-    ensures
-        out.0.inv(),
-        out.1@.valid(out.0.invariant@.constant().thread_rsrc_ids[0], 1),
-        out.1@.val() == 0,
-        out.2@.valid(out.0.invariant@.constant().thread_rsrc_ids[1], 1),
-        out.2@.val() == 0,
-    {
-        let (incrementer, down_frac) = AtomicIncrementer::new();
-
-        let tracked(left_inv_rsrc, left_thread_rsrc) = FractionalResource::alloc(0).split(1);
-        let tracked(right_inv_rsrc, right_thread_rsrc) = FractionalResource::alloc(0).split(1);
-
-        let ghost inv_k = MainInvK{
-            down_id: incrementer.id(),
-            thread_rsrc_ids: map![0 => left_inv_rsrc.id(), 1 => right_inv_rsrc.id()],
-        };
-
-        let mut thread_rsrcs = Tracked( Map::tracked_empty() );
-        proof {
-            thread_rsrcs.borrow_mut().tracked_insert(0, left_inv_rsrc);
-            thread_rsrcs.borrow_mut().tracked_insert(1, right_inv_rsrc);
-        }
-        let tracked inv_v = MainInvV{
-            down_frac: down_frac.get(),
-            thread_rsrcs: thread_rsrcs.get()
-        };
-
-        assert( inv_v.down_frac.val() == 0 );
-        assert( MainInvPred::inv(inv_k, inv_v) );
-        let tracked inv = AtomicInvariant::<_,_,MainInvPred>::new(inv_k, inv_v, 12346);
- 
-        (Self{invariant: Tracked(inv), incrementer}, Tracked(left_thread_rsrc), Tracked(right_thread_rsrc))
-    }
-
-    fn spawn(aself: &Arc<Self>, thread_idx: usize, thread_rsrc: Tracked<FractionalResource<usize, 2>>) -> JoinHandle<()>
-    requires
-        aself.inv(),
-        thread_rsrc@.valid(aself.invariant@.constant().thread_rsrc_ids[thread_idx], 1),
-        thread_rsrc@.val() == 0,
-        thread_idx == 0 || thread_idx == 1,
-    {
-
-        let sself = aself.clone();
-
-        let handle = spawn(move || {
-            let main = &*sself;
-            let open_invariant_credit = create_open_invariant_credit();
-            let cb: Tracked<MainIncrementCB> = Tracked( MainIncrementCB{
-                    thread_idx,
-                    thread_rsrc: thread_rsrc.get(),
-                    invariant: &main.invariant,
-                    credit: open_invariant_credit.get() } );
-            let thread_rsrc = main.incrementer.increment(cb);
-
-            let open_invariant_credit = create_open_invariant_credit();
-            let cb: Tracked<MainIncrementCB>  = Tracked( MainIncrementCB{
-                    thread_idx,
-                    thread_rsrc: thread_rsrc.get(),
-                    invariant: &main.invariant,
-                    credit: open_invariant_credit.get() } );
-            let thread_rsrc = main.incrementer.increment(cb);
-
-
-            // Doing this again should fail verification ... and it does!
-//             let open_invariant_credit = create_open_invariant_credit();
-//             let cb: Tracked<MainIncrementCB>  = Tracked( MainIncrementCB{
-//                     thread_idx,
-//                     thread_rsrc: thread_rsrc.get(),
-//                     invariant: &main.invariant,
-//                     credit: open_invariant_credit.get() } );
-//             assert( cb@.inv() );
-//             let thread_rsrc = main.incrementer.increment(cb);
-        });
-        handle
-    }
-}
-
 struct MainIncrementCB<'a> {
     thread_idx: usize,
     thread_rsrc: FractionalResource<usize, 2>,
@@ -601,17 +518,179 @@ impl<'a> AtomicIncrementerIncrementCallback for MainIncrementCB<'a> {
     }
 }
 
+struct MainGetCB<'a> {
+    invariant: &'a Tracked<AtomicInvariant<MainInvK, MainInvV, MainInvPred>>,
+    tracked credit: OpenInvariantCredit,
+}
+
+impl<'a> AtomicIncrementerGetCallback for MainGetCB<'a> {
+    type CBResult = ();
+
+    spec fn inv(&self) -> bool
+    {
+        true
+    }
+
+    spec fn id(&self) -> int
+    {
+        self.invariant@.constant().down_id
+    }
+
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
+
+    spec fn post(&self, result_val: usize, result: Self::CBResult) -> bool
+    {
+        &&& result_val <= 4
+    }
+
+    proof fn get_cb(tracked self, tracked rsrc: &FractionalResource<usize, 2>, return_val: usize) -> (tracked out: Self::CBResult)
+    {
+        open_atomic_invariant!(self.credit => &self.invariant.borrow() => inv_v => {
+            inv_v.down_frac.agree(rsrc);
+
+            assert( self.invariant@.constant().thread_rsrc_ids.contains_key(0) );   // trigger
+            assert( self.invariant@.constant().thread_rsrc_ids.contains_key(1) );   // trigger
+        });
+        ()
+    }
+}
+
+struct Main {
+    invariant: Tracked<AtomicInvariant<MainInvK, MainInvV, MainInvPred>>,
+    incrementer: AtomicIncrementer,
+}
+
+impl Main {
+    spec fn inv(self) -> bool
+    {
+        &&& self.incrementer.inv()
+        &&& self.invariant@.constant().thread_rsrc_ids.dom() == set![ 0usize, 1usize ]
+        &&& self.invariant@.constant().down_id == self.incrementer.id()
+        &&& self.inv_namespace() != self.incrementer.inv_namespace()
+    }
+
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
+
+    fn new() -> (out: (Self, Tracked<FractionalResource<usize, 2>>, Tracked<FractionalResource<usize, 2>>))
+    ensures
+        out.0.inv(),
+        out.1@.valid(out.0.invariant@.constant().thread_rsrc_ids[0], 1),
+        out.1@.val() == 0,
+        out.2@.valid(out.0.invariant@.constant().thread_rsrc_ids[1], 1),
+        out.2@.val() == 0,
+    {
+        let (incrementer, down_frac) = AtomicIncrementer::new();
+
+        let tracked(left_inv_rsrc, left_thread_rsrc) = FractionalResource::alloc(0).split(1);
+        let tracked(right_inv_rsrc, right_thread_rsrc) = FractionalResource::alloc(0).split(1);
+
+        let ghost inv_k = MainInvK{
+            down_id: incrementer.id(),
+            thread_rsrc_ids: map![0 => left_inv_rsrc.id(), 1 => right_inv_rsrc.id()],
+        };
+
+        let mut thread_rsrcs = Tracked( Map::tracked_empty() );
+        proof {
+            thread_rsrcs.borrow_mut().tracked_insert(0, left_inv_rsrc);
+            thread_rsrcs.borrow_mut().tracked_insert(1, right_inv_rsrc);
+        }
+        let tracked inv_v = MainInvV{
+            down_frac: down_frac.get(),
+            thread_rsrcs: thread_rsrcs.get()
+        };
+
+        assert( inv_v.down_frac.val() == 0 );
+        assert( MainInvPred::inv(inv_k, inv_v) );
+        let tracked inv = AtomicInvariant::<_,_,MainInvPred>::new(inv_k, inv_v, 12346);
+ 
+        (Self{invariant: Tracked(inv), incrementer}, Tracked(left_thread_rsrc), Tracked(right_thread_rsrc))
+    }
+
+    fn spawn_incrementer(aself: &Arc<Self>, thread_idx: usize, thread_rsrc: Tracked<FractionalResource<usize, 2>>) -> JoinHandle<()>
+    requires
+        aself.inv(),
+        thread_rsrc@.valid(aself.invariant@.constant().thread_rsrc_ids[thread_idx], 1),
+        thread_rsrc@.val() == 0,
+        thread_idx == 0 || thread_idx == 1,
+    {
+        let sself = aself.clone();
+
+        let handle = spawn(move || {
+            let main = &*sself;
+            let open_invariant_credit = create_open_invariant_credit();
+            let cb: Tracked<MainIncrementCB> = Tracked( MainIncrementCB{
+                    thread_idx,
+                    thread_rsrc: thread_rsrc.get(),
+                    invariant: &main.invariant,
+                    credit: open_invariant_credit.get() } );
+            let thread_rsrc = main.incrementer.increment(cb);
+
+            let open_invariant_credit = create_open_invariant_credit();
+            let cb: Tracked<MainIncrementCB>  = Tracked( MainIncrementCB{
+                    thread_idx,
+                    thread_rsrc: thread_rsrc.get(),
+                    invariant: &main.invariant,
+                    credit: open_invariant_credit.get() } );
+            let thread_rsrc = main.incrementer.increment(cb);
+
+
+            // Doing this again should fail verification ... and it does!
+//             let open_invariant_credit = create_open_invariant_credit();
+//             let cb: Tracked<MainIncrementCB>  = Tracked( MainIncrementCB{
+//                     thread_idx,
+//                     thread_rsrc: thread_rsrc.get(),
+//                     invariant: &main.invariant,
+//                     credit: open_invariant_credit.get() } );
+//             assert( cb@.inv() );
+//             let thread_rsrc = main.incrementer.increment(cb);
+        });
+        handle
+    }
+
+    fn spawn_getter(aself: &Arc<Self>) -> (handle: JoinHandle<usize>)
+    requires
+        aself.inv(),
+    ensures
+        forall|ret: usize| #[trigger] handle.predicate(ret) ==> ret <= 4
+    {
+        let sself = aself.clone();
+        let handle = spawn(move || {
+            ensures(|return_value: usize| return_value <= 4);
+
+            let main = &*sself;
+
+            let open_invariant_credit = create_open_invariant_credit();
+            let cb: Tracked<MainGetCB> = Tracked( MainGetCB{
+                    invariant: &main.invariant,
+                    credit: open_invariant_credit.get() } );
+            let (return_val, unit) = main.incrementer.get(cb);
+            assert( return_val <= 4 );
+            return_val
+        });
+        handle
+    }
+}
+
 fn main()
 {
     let (main, left_rsrc, right_rsrc) = Main::new();
     assert( main.incrementer.inv() );
     let arc_main = Arc::new(main);
 
-    let h0 = Main::spawn(&arc_main, 0, left_rsrc);
-    let h1 = Main::spawn(&arc_main, 1, right_rsrc);
+    let h0 = Main::spawn_incrementer(&arc_main, 0, left_rsrc);
+    let h1 = Main::spawn_incrementer(&arc_main, 1, right_rsrc);
+
+    let h2 = Main::spawn_getter(&arc_main);
 
     h0.join();
     h1.join();
+    let computation = h2.join();
+    assert(
+        match computation {
+            Ok(value) => value <= 4,
+            Err(()) => true,
+        }
+    );
 }
 
 } // verus
