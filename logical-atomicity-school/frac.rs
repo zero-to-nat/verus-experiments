@@ -101,13 +101,13 @@ verus! {
             self.inv() && self.id() == id && self.frac() == frac
         }
 
-        pub proof fn default() -> (tracked result: FractionalResource<T, Total>)
+        pub proof fn dummy() -> (tracked result: FractionalResource<T, Total>)
         {
             let tracked r = Resource::alloc(Fractional::unit());
             FractionalResource{ r }
         }
 
-        pub proof fn alloc(v: T) -> (tracked result: FractionalResource<T, Total>)
+        pub proof fn new(v: T) -> (tracked result: FractionalResource<T, Total>)
             requires
                 Total > 0,
             ensures
@@ -130,6 +130,17 @@ verus! {
         {
             let tracked joined = self.r.join_shared(&other.r);
             joined.validate()
+        }
+
+        pub proof fn take(tracked &mut self) -> (tracked result: FractionalResource<T, Total>)
+            requires
+                old(self).inv(),
+            ensures
+                result == *old(self),
+        {
+            let tracked mut r = Self::dummy();
+            tracked_swap(self, &mut r);
+            r
         }
 
         pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: FractionalResource<T, Total>)
@@ -243,7 +254,7 @@ verus! {
 
     fn main()
     {
-        let tracked r = FractionalResource::<u64, 3>::alloc(123);
+        let tracked r = FractionalResource::<u64, 3>::new(123);
         assert(r.val() == 123);
         assert(r.frac() == 3);
         let tracked (r1, r2) = r.split(2);
