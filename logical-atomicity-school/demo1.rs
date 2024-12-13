@@ -11,6 +11,155 @@ use crate::frac::*;
 
 verus!{
 
+trait SillyLogAppendCallback: Sized {
+    type CBResult;
+
+    spec fn pushed_value(&self) -> usize
+        ;
+
+    spec fn inv(&self) -> bool
+        ;
+
+    spec fn id(&self) -> int
+        ;
+
+    spec fn inv_namespace(&self) -> int
+        ;
+
+    spec fn other_namespace(&self) -> int
+        ;
+
+    spec fn post(&self, result: &Self::CBResult) -> bool
+        ;
+
+    proof fn append_cb(
+        tracked self,
+        tracked rsrc: FractionalResource<Seq<usize>, 2>)
+    -> (tracked out: (FractionalResource<Seq<usize>, 2>, Self::CBResult))
+    requires
+        self.inv(),
+        rsrc.valid(self.id(), 1),
+    ensures
+        out.0.valid(self.id(), 1),
+        out.0.val() == rsrc.val().push(self.pushed_value()),
+        self.post(&out.1),
+    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
+    ;
+}
+
+trait SillyLogReadCallback: Sized {
+    type CBResult;
+
+    spec fn inv(&self) -> bool
+        ;
+
+    spec fn id(&self) -> int
+        ;
+
+    spec fn inv_namespace(&self) -> int
+        ;
+
+    spec fn other_namespace(&self) -> int
+        ;
+
+    spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
+        ;
+
+    proof fn read_cb(
+        tracked self,
+        tracked rsrc: &FractionalResource<Seq<usize>, 2>,
+        return_val: &Vec<usize>)
+    -> (tracked out: Self::CBResult)
+    requires
+        self.inv(),
+        rsrc.valid(self.id(), 1),
+        rsrc.val() == return_val@,
+    ensures
+        self.post(return_val, &out),
+    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
+    ;
+}
+
+struct SillyLogState {
+    phy: Vec<usize>,
+    rsrc: Tracked<FractionalResource<Seq<usize>, 2>>,
+}
+
+struct SillyLogPred {
+    id: int,
+}
+
+impl RwLockPredicate<SillyLogState> for SillyLogPred {
+    closed spec fn inv(self, v: SillyLogState) -> bool {
+        &&& v.rsrc@.valid(self.id, 1) 
+        &&& v.rsrc@.val() == v.phy@
+    }
+}
+
+struct SillyLog {
+    locked_state: RwLock<SillyLogState, SillyLogPred>,
+}
+
+impl SillyLog {
+    spec fn id(&self) -> int { self.locked_state.pred().id }
+
+    fn new() -> (out: (Self, Tracked<FractionalResource<Seq<usize>, 2>>))
+    ensures
+        out.1@.valid(out.0.id(), 1),
+        out.1@.val() == Seq::<usize>::empty(),
+    {
+        let tracked(my_part, caller_part) = FractionalResource::alloc(Seq::empty()).split(1);
+        let state = SillyLogState {
+            phy: Vec::new(),
+            rsrc: Tracked(my_part),
+        };
+        let ghost pred = SillyLogPred{id: state.rsrc@.id()};
+        let locked_state = RwLock::new(state, Ghost(pred));
+        let log = Self{ locked_state };
+        (log, Tracked(caller_part))
+    }
+
+    fn append<CB: SillyLogAppendCallback>(&self, v: usize, cb: Tracked<CB>)
+        -> (out: Tracked<CB::CBResult>)
+    requires
+        cb@.pushed_value() == v,
+        cb@.inv(),
+        cb@.id() == self.id(),
+    ensures
+        cb@.post(&out@),
+    {
+        let (mut state, lock_handle) = self.locked_state.acquire_write();
+        let ghost old_state = state.rsrc@.val();
+        state.phy.push(v);
+
+        let tracked (new_state_rsrc, cb_result) = ( cb.get().append_cb(state.rsrc.get()) );
+        state.rsrc = Tracked(new_state_rsrc);
+
+        lock_handle.release_write(state);
+        Tracked(cb_result)
+    }
+
+    fn read<CB: SillyLogReadCallback>(&self, cb: Tracked<CB>)
+    -> (out: (Vec<usize>, Tracked<CB::CBResult>))
+    requires
+        cb@.inv(),
+        cb@.id() == self.id(),
+    ensures
+        cb@.post(&out.0, &out.1@),
+    {
+        let read_handle = self.locked_state.acquire_read();
+        let phy_result = read_handle.borrow().phy.clone();
+        let callee_frac = &read_handle.borrow().rsrc;
+
+        let cbresult = Tracked({ cb.get().read_cb(&callee_frac.borrow(), &phy_result) });
+        read_handle.release_read();
+
+        (phy_result, cbresult)
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
 trait AtomicIncrementerIncrementCallback: Sized {
     type CBResult;
 
@@ -28,18 +177,14 @@ trait AtomicIncrementerIncrementCallback: Sized {
 
     proof fn increment_cb(tracked self, tracked rsrc: &mut FractionalResource<usize, 2>) -> (tracked out: Self::CBResult)
     requires
-        old(rsrc).frac() == 1,
-        old(rsrc).inv(),
         self.inv(),
-        self.id() == old(rsrc).id()
+        old(rsrc).valid(self.id(), 1),
     ensures
-        rsrc.frac() == 1,
-        rsrc.inv(),
+        rsrc.valid(self.id(), 1),
         rsrc.val() == old(rsrc).val() + 1,
-        rsrc.id() == old(rsrc).id(),
         self.post(&out),
     opens_invariants [ self.inv_namespace() ]
-    ;
+        ;
 }
 
 trait AtomicIncrementerGetCallback: Sized {
@@ -59,10 +204,8 @@ trait AtomicIncrementerGetCallback: Sized {
 
     proof fn get_cb(tracked self, tracked rsrc: &FractionalResource<usize, 2>, return_val: usize) -> (tracked out: Self::CBResult)
     requires
-        rsrc.frac() == 1,
-        rsrc.inv(),
         self.inv(),
-        self.id() == rsrc.id(),
+        rsrc.valid(self.id(), 1),
         return_val == rsrc.val(),
     ensures
         self.post(return_val, out),
@@ -86,21 +229,10 @@ struct AtomicIncrementerInvPred {
 impl InvariantPredicate<AtomicIncrementerInvK, AtomicIncrementerInvV > for AtomicIncrementerInvPred {
     closed spec fn inv(k: AtomicIncrementerInvK, v: AtomicIncrementerInvV) -> bool
     {
-        &&& v.up_frac.inv()
-        &&& v.up_frac.id() == k.up_id
-        &&& v.up_frac.frac() == 1
-
+        &&& v.up_frac.valid(k.up_id, 1)
         &&& v.up_frac.val() == v.down_frac.val().len()
-
-        &&& v.down_frac.inv()
-        &&& v.down_frac.id() == k.down_id
-        &&& v.down_frac.frac() == 1
+        &&& v.down_frac.valid(k.down_id, 1)
     }
-}
-
-struct AtomicIncrementer {
-    invariant: Tracked<AtomicInvariant<AtomicIncrementerInvK, AtomicIncrementerInvV, AtomicIncrementerInvPred>>,
-    log: SillyLog,
 }
 
 struct AtomicIncrementerIncrementCB<'a, UpCB: AtomicIncrementerIncrementCallback> {
@@ -109,7 +241,7 @@ struct AtomicIncrementerIncrementCB<'a, UpCB: AtomicIncrementerIncrementCallback
     tracked credit: OpenInvariantCredit,
 }
 
-impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogInvAppendCallback for AtomicIncrementerIncrementCB<'a, UpCB> {
+impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogAppendCallback for AtomicIncrementerIncrementCB<'a, UpCB> {
     type CBResult = UpCB::CBResult;
 
     spec fn pushed_value(&self) -> usize { 1 }
@@ -131,20 +263,23 @@ impl<'a, UpCB: AtomicIncrementerIncrementCallback> SillyLogInvAppendCallback for
 
     proof fn append_cb(
         tracked self,
-        tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
-    -> tracked Self::CBResult
+        tracked rsrc: FractionalResource<Seq<usize>, 2>)
+    -> (tracked out: (FractionalResource<Seq<usize>, 2>, Self::CBResult))
     {
         let tracked mut cb_result;
+        let tracked mut new_rsrc;
+
         open_atomic_invariant!(self.credit => &self.invariant.borrow() => inner_val => {
-            rsrc.combine_mut(inner_val.down_frac);
+            new_rsrc = rsrc;
+            new_rsrc.combine_mut(inner_val.down_frac);
             let new_v = rsrc.val().push(1);
-            rsrc.update_mut(new_v);
+            new_rsrc.update_mut(new_v);
             assert( self.invariant@.namespace() != self.up_cb.inv_namespace() );
             cb_result = self.up_cb.increment_cb(&mut inner_val.up_frac);
-            inner_val.down_frac = rsrc.split_mut(1);
+            inner_val.down_frac = new_rsrc.split_mut(1);
         });
 
-        cb_result
+        (new_rsrc, cb_result)
     }
 
     spec fn post(&self, result: &Self::CBResult) -> bool
@@ -159,7 +294,7 @@ struct AtomicIncrementerGetCB<'a, UpCB: AtomicIncrementerGetCallback> {
     tracked credit: OpenInvariantCredit,
 }
 
-impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogInvReadCallback for AtomicIncrementerGetCB<'a, UpCB> {
+impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogReadCallback for AtomicIncrementerGetCB<'a, UpCB> {
     type CBResult = UpCB::CBResult;
 
     spec fn id(&self) -> int {
@@ -196,6 +331,11 @@ impl<'a, UpCB: AtomicIncrementerGetCallback> SillyLogInvReadCallback for AtomicI
     {
         &&& self.up_cb.post(return_val.len(), *result)
     }
+}
+
+struct AtomicIncrementer {
+    invariant: Tracked<AtomicInvariant<AtomicIncrementerInvK, AtomicIncrementerInvV, AtomicIncrementerInvPred>>,
+    log: SillyLog,
 }
 
 impl AtomicIncrementer {
@@ -269,162 +409,6 @@ impl AtomicIncrementer {
 
 //////////////////////////////////////////////////////////////////////////////
 
-struct SillyLogState {
-    phy: Vec<usize>,
-    abs: Tracked<FractionalResource<Seq<usize>, 2>>,
-}
-
-struct SillyLogPred {
-    id: int,
-}
-
-impl RwLockPredicate<SillyLogState> for SillyLogPred {
-    closed spec fn inv(self, v: SillyLogState) -> bool {
-        &&& v.abs@.inv()    // internal inv for FractionalResource
-        &&& v.abs@.frac() == 1
-        &&& v.abs@.val() == v.phy@
-        &&& v.abs@.id() == self.id
-    }
-}
-
-struct SillyLog {
-    locked_state: RwLock<SillyLogState, SillyLogPred>,
-}
-
-trait SillyLogInvAppendCallback: Sized {
-    type CBResult;
-
-    spec fn pushed_value(&self) -> usize
-        ;
-
-    spec fn inv(&self) -> bool
-        ;
-
-    spec fn id(&self) -> int
-        ;
-
-    spec fn inv_namespace(&self) -> int
-        ;
-
-    spec fn other_namespace(&self) -> int
-        ;
-
-    spec fn post(&self, result: &Self::CBResult) -> bool
-        ;
-
-    proof fn append_cb(
-        tracked self,
-        tracked rsrc: &mut FractionalResource<Seq<usize>, 2>)
-    -> (tracked out: Self::CBResult)
-    requires
-        old(rsrc).frac() == 1,
-        old(rsrc).inv(),
-        self.inv(),
-        self.id() == old(rsrc).id()
-    ensures
-        rsrc.frac() == 1,
-        rsrc.inv(),
-        rsrc.val() == old(rsrc).val().push(self.pushed_value()),
-        self.post(&out),
-        rsrc.id() == old(rsrc).id(),
-    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
-    ;
-}
-
-trait SillyLogInvReadCallback: Sized {
-    type CBResult;
-
-    spec fn inv(&self) -> bool
-        ;
-
-    spec fn id(&self) -> int
-        ;
-
-    spec fn inv_namespace(&self) -> int
-        ;
-
-    spec fn other_namespace(&self) -> int
-        ;
-
-    spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
-        ;
-
-    proof fn read_cb(
-        tracked self,
-        tracked rsrc: &FractionalResource<Seq<usize>, 2>,
-        return_val: &Vec<usize>)
-    -> (tracked out: Self::CBResult)
-    requires
-        rsrc.frac() == 1,
-        rsrc.inv(),
-        self.inv(),
-        self.id() == rsrc.id(),
-        return_val@ == rsrc.val(),
-    ensures
-        self.post(return_val, &out),
-    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
-    ;
-}
-
-impl SillyLog {
-    spec fn id(&self) -> int { self.locked_state.pred().id }
-
-    fn new() -> (out: (Self, Tracked<FractionalResource<Seq<usize>, 2>>))
-    ensures
-        out.1@.val() == Seq::<usize>::empty(),
-        out.1@.inv(),
-        out.1@.frac() == 1,
-        out.1@.id() == out.0.id(),
-    {
-        let tracked(my_part, caller_part) = FractionalResource::alloc(Seq::empty()).split(1);
-
-        let state = SillyLogState {
-            phy: Vec::new(),
-            abs: Tracked(my_part),
-        };
-        let ghost pred = SillyLogPred{id: state.abs@.id()};
-        let locked_state = RwLock::new(state, Ghost(pred));
-        let log = Self{ locked_state };
-        (log, Tracked(caller_part))
-    }
-
-    fn append<CB: SillyLogInvAppendCallback>(&self, v: usize, cb: Tracked<CB>)
-        -> (out: Tracked<CB::CBResult>)
-    requires
-        cb@.pushed_value() == v,
-        cb@.inv(),
-        cb@.id() == self.id(),
-    ensures
-        cb@.post(&out@),
-    {
-        let (mut state, lock_handle) = self.locked_state.acquire_write();
-        let ghost old_state = state.abs@.val();
-        state.phy.push(v);
-        let cb_result = Tracked( cb.get().append_cb(state.abs.borrow_mut()) );
-        lock_handle.release_write(state);
-        cb_result
-    }
-
-    fn read<CB: SillyLogInvReadCallback>(&self, cb: Tracked<CB>)
-    -> (out: (Vec<usize>, Tracked<CB::CBResult>))
-    requires
-        cb@.inv(),
-        cb@.id() == self.id(),
-    ensures
-        cb@.post(&out.0, &out.1@),
-    {
-        let read_handle = self.locked_state.acquire_read();
-        let phy_result = read_handle.borrow().phy.clone();
-        let callee_frac = &read_handle.borrow().abs;
-
-        let cbresult = Tracked({ cb.get().read_cb(&callee_frac.borrow(), &phy_result) });
-        read_handle.release_read();
-
-        (phy_result, cbresult)
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////////
 
 struct MainInvK {
     down_id: int,
@@ -433,7 +417,7 @@ struct MainInvK {
 
 struct MainInvV {
     down_frac: FractionalResource<usize, 2>,
-    thread_rsrcs: Map<usize, FractionalResource<usize, 2>>,
+    thread_rsrcs: Map<usize, FractionalResource<usize, 2>>, // main's client rsrc for thread 
 }
 
 struct MainInvPred {}
@@ -441,19 +425,14 @@ struct MainInvPred {}
 impl InvariantPredicate<MainInvK, MainInvV> for MainInvPred {
     closed spec fn inv(k: MainInvK, v: MainInvV) -> bool
     {
-        &&& v.down_frac.inv()
-        &&& v.down_frac.id() == k.down_id
-        &&& v.down_frac.frac() == 1
+        &&& v.down_frac.valid(k.down_id, 1)
 
         &&& forall |idx| #[trigger] k.thread_rsrc_ids.contains_key(idx) ==> {
-            &&& v.thread_rsrcs[idx].inv()
-            &&& v.thread_rsrcs[idx].id() == k.thread_rsrc_ids[idx]
-            &&& v.thread_rsrcs[idx].frac() == 1
+            &&& v.thread_rsrcs[idx].valid(k.thread_rsrc_ids[idx], 1)
             &&& v.thread_rsrcs[idx].val() <= 2
         }
 
         // there are exactly two threads
-//         &&& forall |idx| thread_rsrcs.contains_key(idx) <==> { idx == 0 || idx == 1 }
         &&& k.thread_rsrc_ids.dom() == set![ 0usize, 1usize ]
         &&& v.thread_rsrcs.dom() == k.thread_rsrc_ids.dom()
 
@@ -474,11 +453,7 @@ impl<'a> AtomicIncrementerIncrementCallback for MainIncrementCB<'a> {
     spec fn inv(&self) -> bool
     {
         &&& (self.thread_idx == 0 || self.thread_idx == 1)
-        &&& self.thread_rsrc.inv()
-        &&& self.thread_rsrc.id()
-            == self.invariant@.constant().thread_rsrc_ids[self.thread_idx]
-        &&& self.thread_rsrc.frac() == 1
-
+        &&& self.thread_rsrc.valid(self.invariant@.constant().thread_rsrc_ids[self.thread_idx], 1)
         &&& self.thread_rsrc.val() < 2
     }
 
