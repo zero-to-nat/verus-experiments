@@ -1,7 +1,6 @@
 use builtin::*;
 use vstd::prelude::*;
 use vstd::rwlock::*;
-use vstd::modes::*;
 use vstd::invariant::*;
 use std::sync::Arc;
 use vstd::thread::*;
@@ -18,41 +17,41 @@ trait CallBackSemantics : Sized{
     type GhostResult;   // output of call back (e.g. fractional resource)
     type ExecResult;
 
-    spec fn _requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
+    spec fn requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
     ;
 
-    spec fn _ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
+    spec fn ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
     ;
 }
 
 trait GenericCallBack<S: CallBackSemantics> : Sized {
     type CBResult; // external result
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
         ;
 
-    spec fn _id(&self) -> ID // value based on S?
+    spec fn id(&self) -> ID // value based on S?
         ;
 
     // _inv_namespaces
-    spec fn _inv_namespace(&self) -> int
+    spec fn inv_namespace(&self) -> int
         ;
 
-    spec fn _other_namespace(&self) -> int
+    spec fn other_namespace(&self) -> int
         ;
 
-    spec fn _post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
+    spec fn post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
         ;
 
     proof fn cb(tracked self, tracked p: S::Param, e: &S::ExecResult)
         -> (tracked out: (S::GhostResult, Self::CBResult))
     requires
-        self._inv(),
-        S::_requires(self._id(), p, *e),
+        self.inv(),
+        S::requires(self.id(), p, *e),
     ensures
-        S::_ensures(self._id(), p, out.0),
-        self._post(e, &out.1),
-    opens_invariants [ self._inv_namespace(), self._other_namespace() ]
+        S::ensures(self.id(), p, out.0),
+        self.post(e, &out.1),
+    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
     ;
 }
 
@@ -61,31 +60,31 @@ trait GenericCallBack<S: CallBackSemantics> : Sized {
 trait GenericReadCallBack<S: CallBackSemantics> : Sized {
     type CBResult; // external result
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
         ;
 
-    spec fn _id(&self) -> ID // value based on S?
+    spec fn id(&self) -> ID // value based on S?
         ;
 
     // _inv_namespaces
-    spec fn _inv_namespace(&self) -> int
+    spec fn inv_namespace(&self) -> int
         ;
 
-    spec fn _other_namespace(&self) -> int
+    spec fn other_namespace(&self) -> int
         ;
 
-    spec fn _post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
+    spec fn post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
         ;
 
     proof fn cb(tracked self, tracked p: &S::Param, e: &S::ExecResult)
         -> (tracked out: (S::GhostResult, Self::CBResult))
     requires
-        self._inv(),
-        S::_requires(self._id(), *p, *e),
+        self.inv(),
+        S::requires(self.id(), *p, *e),
     ensures
-        S::_ensures(self._id(), *p, out.0),
-        self._post(e, &out.1),
-    opens_invariants [ self._inv_namespace(), self._other_namespace() ]
+        S::ensures(self.id(), *p, out.0),
+        self.post(e, &out.1),
+    opens_invariants [ self.inv_namespace(), self.other_namespace() ]
     ;
 }
 
@@ -94,28 +93,28 @@ trait GenericReadCallBack<S: CallBackSemantics> : Sized {
 trait GenericSingleInvCallBack<S: CallBackSemantics> : Sized {
     type CBResult; // external result
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
         ;
 
-    spec fn _id(&self) -> ID // value based on S?
+    spec fn id(&self) -> ID // value based on S?
         ;
 
     // _inv_namespaces
-    spec fn _inv_namespace(&self) -> int
+    spec fn inv_namespace(&self) -> int
         ;
 
-    spec fn _post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
+    spec fn post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
         ;
 
     proof fn cb(tracked self, tracked p: S::Param, e: &S::ExecResult)
         -> (tracked out: (S::GhostResult, Self::CBResult))
     requires
-        self._inv(),
-        S::_requires(self._id(), p, *e),
+        self.inv(),
+        S::requires(self.id(), p, *e),
     ensures
-        S::_ensures(self._id(), p, out.0),
-        self._post(e, &out.1),
-    opens_invariants [ self._inv_namespace() ]
+        S::ensures(self.id(), p, out.0),
+        self.post(e, &out.1),
+    opens_invariants [ self.inv_namespace() ]
     ;
 }
 
@@ -124,28 +123,28 @@ trait GenericSingleInvCallBack<S: CallBackSemantics> : Sized {
 trait GenericSingleInvReadCallBack<S: CallBackSemantics> : Sized {
     type CBResult; // external result
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
         ;
 
-    spec fn _id(&self) -> ID // value based on S?
+    spec fn id(&self) -> ID // value based on S?
         ;
 
     // _inv_namespaces
-    spec fn _inv_namespace(&self) -> int
+    spec fn inv_namespace(&self) -> int
         ;
 
-    spec fn _post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
+    spec fn post(&self, r: &S::ExecResult, cbr: &Self::CBResult) -> bool
         ;
 
     proof fn cb(tracked self, tracked p: &S::Param, e: &S::ExecResult)
         -> (tracked out: (S::GhostResult, Self::CBResult))
     requires
-        self._inv(),
-        S::_requires(self._id(), *p, *e),
+        self.inv(),
+        S::requires(self.id(), *p, *e),
     ensures
-        S::_ensures(self._id(), *p, out.0),
-        self._post(e, &out.1),
-    opens_invariants [ self._inv_namespace() ]
+        S::ensures(self.id(), *p, out.0),
+        self.post(e, &out.1),
+    opens_invariants [ self.inv_namespace() ]
     ;
 }
 
@@ -158,12 +157,12 @@ impl CallBackSemantics for SillyLogAppendSemantics  {
     type GhostResult = FractionalResource<Seq<usize>, 2>;
     type ExecResult = ();
 
-    spec fn _requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
+    spec fn requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
     {
         p.valid(id, 1)
     }
 
-    spec fn _ensures(id: ID, p: Self::Param, r: Self::GhostResult) -> bool
+    spec fn ensures(id: ID, p: Self::Param, r: Self::GhostResult) -> bool
     {
         &&& r.valid(id, 1)
         &&& r.val() == p.val().push(1)
@@ -173,19 +172,19 @@ impl CallBackSemantics for SillyLogAppendSemantics  {
 impl<'a, UpCB: GenericSingleInvCallBack<AtomicIncIncrementSemantics>> GenericCallBack<SillyLogAppendSemantics> for AtomicIncrementerIncrementCB<'a, UpCB> {
     type CBResult = UpCB::CBResult;
 
-    spec fn _id(&self) -> int {
+    spec fn id(&self) -> int {
         self.invariant@.constant().down_id
     }
 
-    spec fn _inv_namespace(&self) -> int { self.invariant@.namespace() }
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
 
-    spec fn _other_namespace(&self) -> int { self.up_cb._inv_namespace() }
+    spec fn other_namespace(&self) -> int { self.up_cb.inv_namespace() }
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
     {
-        &&& self.up_cb._inv()
-        &&& self.invariant@.constant().up_id == self.up_cb._id()
-        &&& self.up_cb._inv_namespace() != self._inv_namespace()
+        &&& self.up_cb.inv()
+        &&& self.invariant@.constant().up_id == self.up_cb.id()
+        &&& self.up_cb.inv_namespace() != self.inv_namespace()
     }
 
     proof fn cb(
@@ -203,7 +202,7 @@ impl<'a, UpCB: GenericSingleInvCallBack<AtomicIncIncrementSemantics>> GenericCal
             new_rsrc.combine_mut(inner_val.down_frac);
             let new_v = rsrc.val().push(1);
             new_rsrc.update_mut(new_v);
-            assert( self.invariant@.namespace() != self.up_cb._inv_namespace() );
+            assert( self.invariant@.namespace() != self.up_cb.inv_namespace() );
 
             let tracked (new_up_frac, result) = self.up_cb.cb(inner_val.up_frac.take(), &());
             inner_val.up_frac = new_up_frac;
@@ -214,9 +213,9 @@ impl<'a, UpCB: GenericSingleInvCallBack<AtomicIncIncrementSemantics>> GenericCal
         (new_rsrc, cb_result)
     }
 
-    spec fn _post(&self, r: &(), result: &Self::CBResult) -> bool
+    spec fn post(&self, r: &(), result: &Self::CBResult) -> bool
     {
-        &&& self.up_cb._post(r, result)
+        &&& self.up_cb.post(r, result)
     }
 }
 
@@ -227,13 +226,13 @@ impl CallBackSemantics for SillyLogReadSemantics {
     type ExecResult = Vec<usize>;
     type GhostResult = ();
 
-    spec fn _requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
+    spec fn requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
     {
         &&& p.valid(id, 1)
         &&& p.val() == e@
     }
 
-    spec fn _ensures(id: ID, p: Self::Param, r: Self::GhostResult) -> bool
+    spec fn ensures(id: ID, p: Self::Param, r: Self::GhostResult) -> bool
     {
         true
     }
@@ -242,19 +241,19 @@ impl CallBackSemantics for SillyLogReadSemantics {
 impl<'a, UpCB: GenericSingleInvReadCallBack<AtomicIncGetSemantics>> GenericReadCallBack<SillyLogReadSemantics> for AtomicIncrementerGetCB<'a, UpCB> {
     type CBResult = UpCB::CBResult;
 
-    spec fn _id(&self) -> int {
+    spec fn id(&self) -> int {
         self.invariant@.constant().down_id
     }
 
-    spec fn _inv_namespace(&self) -> int { self.invariant@.namespace() }
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
 
-    spec fn _other_namespace(&self) -> int { self.up_cb._inv_namespace() }
+    spec fn other_namespace(&self) -> int { self.up_cb.inv_namespace() }
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
     {
-        &&& self.up_cb._inv()
-        &&& self.invariant@.constant().up_id == self.up_cb._id()
-        &&& self.up_cb._inv_namespace() != self._inv_namespace()
+        &&& self.up_cb.inv()
+        &&& self.invariant@.constant().up_id == self.up_cb.id()
+        &&& self.up_cb.inv_namespace() != self.inv_namespace()
     }
 
     proof fn cb(
@@ -274,9 +273,9 @@ impl<'a, UpCB: GenericSingleInvReadCallBack<AtomicIncGetSemantics>> GenericReadC
     }
 
     // result post want the value 
-    spec fn _post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
+    spec fn post(&self, return_val: &Vec<usize>, result: &Self::CBResult) -> bool
     {
-        self.up_cb._post(&return_val.len(), result)
+        self.up_cb.post(&return_val.len(), result)
     }
 }
 
@@ -323,10 +322,10 @@ impl SillyLog {
         -> (out: Tracked<CB::CBResult>)
     requires
         v == 1,
-        cb@._inv(),
-        cb@._id() == self.id(),
+        cb@.inv(),
+        cb@.id() == self.id(),
     ensures
-        cb@._post(&(), &out@),
+        cb@.post(&(), &out@),
     {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
         let ghost old_state = state.rsrc@.val();
@@ -342,10 +341,10 @@ impl SillyLog {
     fn read<CB: GenericReadCallBack<SillyLogReadSemantics>>(&self, cb: Tracked<CB>)
     -> (out: (Vec<usize>, Tracked<CB::CBResult>))
     requires
-        cb@._inv(),
-        cb@._id() == self.id(),
+        cb@.inv(),
+        cb@.id() == self.id(),
     ensures
-        cb@._post(&out.0, &out.1@),
+        cb@.post(&out.0, &out.1@),
     {
         let read_handle = self.locked_state.acquire_read();
         let phy_result = read_handle.borrow().phy.clone();
@@ -436,16 +435,16 @@ impl AtomicIncrementer {
         -> (out: Tracked<CB::CBResult>)
     requires
         self.inv(),
-        up_cb@._inv(),
-        up_cb@._id() == self.id(),
-        up_cb@._inv_namespace() != self.inv_namespace(),
+        up_cb@.inv(),
+        up_cb@.id() == self.id(),
+        up_cb@.inv_namespace() != self.inv_namespace(),
     ensures
-        up_cb@._post(&(), &out@),
+        up_cb@.post(&(), &out@),
     {
         let open_invariant_credit = create_open_invariant_credit();
         let down_cb:Tracked<AtomicIncrementerIncrementCB<CB>> = Tracked(AtomicIncrementerIncrementCB{invariant: &self.invariant, up_cb: up_cb.get(), credit: open_invariant_credit.get() });
 
-        assert( down_cb@._inv() );
+        assert( down_cb@.inv() );
         self.log.append(1, down_cb)
     }
     
@@ -453,11 +452,11 @@ impl AtomicIncrementer {
     -> (out: (usize, Tracked<CB::CBResult>))
     requires
         self.inv(),
-        up_cb@._inv(),
-        up_cb@._id() == self.id(),
-        up_cb@._inv_namespace() != self.inv_namespace(),
+        up_cb@.inv(),
+        up_cb@.id() == self.id(),
+        up_cb@.inv_namespace() != self.inv_namespace(),
     ensures
-        up_cb@._post(&out.0, &out.1@),
+        up_cb@.post(&out.0, &out.1@),
     {
         let open_invariant_credit = create_open_invariant_credit();
         let down_cb:Tracked<AtomicIncrementerGetCB<CB>> = Tracked(AtomicIncrementerGetCB{invariant: &self.invariant, up_cb: up_cb.get(), credit: open_invariant_credit.get()});
@@ -514,12 +513,12 @@ impl CallBackSemantics for AtomicIncIncrementSemantics{
     type GhostResult = FractionalResource<usize, 2>;
     type ExecResult = ();
 
-    spec fn _requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
+    spec fn requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
     {
         p.valid(id, 1)
     }
 
-    spec fn _ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
+    spec fn ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
     {
         &&& e.valid(id, 1)
         &&& e.val() == p.val() + 1
@@ -529,21 +528,21 @@ impl CallBackSemantics for AtomicIncIncrementSemantics{
 impl<'a> GenericSingleInvCallBack<AtomicIncIncrementSemantics> for MainIncrementCB<'a> {
     type CBResult = FractionalResource<usize, 2>;
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
     {
         &&& (self.thread_idx == 0 || self.thread_idx == 1)
         &&& self.thread_rsrc.valid(self.invariant@.constant().thread_rsrc_ids[self.thread_idx], 1)
         &&& self.thread_rsrc.val() < 2
     }
 
-    spec fn _id(&self) -> int
+    spec fn id(&self) -> int
     {
         self.invariant@.constant().down_id
     }
 
-    spec fn _inv_namespace(&self) -> int { self.invariant@.namespace() }
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
 
-    spec fn _post(&self, r: &(), cb_result: &Self::CBResult) -> bool
+    spec fn post(&self, r: &(), cb_result: &Self::CBResult) -> bool
     {
         &&& cb_result.valid(self.thread_rsrc.id(), 1)
         &&& cb_result.val() == self.thread_rsrc.val() + 1
@@ -589,13 +588,13 @@ impl CallBackSemantics for AtomicIncGetSemantics{
     type GhostResult = ();
     type ExecResult = usize;
 
-    spec fn _requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
+    spec fn requires(id: ID, p: Self::Param, e: Self::ExecResult) -> bool
     {
         &&& p.valid(id, 1)
         &&& p.val() == e
     }
 
-    spec fn _ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
+    spec fn ensures(id: ID, p: Self::Param, e: Self::GhostResult) -> bool
     {
         true
     }
@@ -604,19 +603,19 @@ impl CallBackSemantics for AtomicIncGetSemantics{
 impl<'a> GenericSingleInvReadCallBack<AtomicIncGetSemantics> for MainGetCB<'a> {
     type CBResult = ();
 
-    spec fn _inv(&self) -> bool
+    spec fn inv(&self) -> bool
     {
         true
     }
 
-    spec fn _id(&self) -> int
+    spec fn id(&self) -> int
     {
         self.invariant@.constant().down_id
     }
 
-    spec fn _inv_namespace(&self) -> int { self.invariant@.namespace() }
+    spec fn inv_namespace(&self) -> int { self.invariant@.namespace() }
 
-    spec fn _post(&self, result_val: &usize, result: &Self::CBResult) -> bool
+    spec fn post(&self, result_val: &usize, result: &Self::CBResult) -> bool
     {
         result_val <= 4
     }
