@@ -1,4 +1,3 @@
-// use builtin::*;
 use vstd::pcm::*;
 use vstd::map::*;
 use vstd::prelude::*;
@@ -208,6 +207,12 @@ verus! {
         pub closed spec fn view(self) -> Map<K, V>
         {
             self.r.value().frac.unwrap()
+        }
+
+        pub open spec fn valid(self, id: Loc) -> bool
+        {
+            &&& self.inv()
+            &&& self.id() == id
         }
 
         pub proof fn dummy() -> (tracked result: MapFrac<K, V>)
