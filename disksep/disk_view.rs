@@ -58,6 +58,7 @@ verus! {
 
         pub closed spec fn inv(self) -> bool
         {
+            &&& self.d.inv()
             &&& self.a@.inv()
             &&& forall |a: usize| self.disk_matches_view(a)
         }
@@ -67,7 +68,7 @@ verus! {
             self.a@.id()
         }
 
-        pub fn read(&self, a: usize, Tracked(perm): Tracked<&DiskView>) -> (result: u8)
+        pub fn read_one(&self, a: usize, Tracked(perm): Tracked<&DiskView>) -> (result: u8)
             requires
                 self.inv(),
                 perm.valid(self.id()),
@@ -79,10 +80,10 @@ verus! {
                 perm.agree(self.a.borrow());
             }
             assert(self.disk_matches_view(a));
-            self.d.read(a)
+            self.d.read_one(a)
         }
 
-        pub fn write(&mut self, a: usize, v: u8, Tracked(perm): Tracked<&mut DiskView>)
+        pub fn write_one(&mut self, a: usize, v: u8, Tracked(perm): Tracked<&mut DiskView>)
             requires
                 old(self).inv(),
                 old(perm).valid(old(self).id()),
@@ -97,7 +98,7 @@ verus! {
                 perm.agree(self.a.borrow());
             }
             assert(self.disk_matches_view(a));
-            self.d.write(a, v);
+            self.d.write_one(a, v);
             proof {
                 perm.update(self.a.borrow_mut(), map![a => v]);
             }
@@ -106,7 +107,28 @@ verus! {
             }
         }
 
+/*
+        pub fn read_range(&self, a: usize, len: usize, Tracked(perm): Tracked<&DiskView>) -> (result: Vec<u8>)
+            requires
+                self.inv(),
+                perm.valid(self.id()),
+                Set::<usize>::new(|i| a <= i < a + len) <= perm@.dom(),
+            ensures
+                result@ =~= Seq::new(len as nat, |i| perm@[(a + i) as usize]),
+        {
+            proof {
+                perm.agree(self.a.borrow());
+            }
+            let r = self.d.read(a, len);
+            assert(r@ =~= self.d@.subrange(a as int, a+len as nat));
+            assert(self.d@.subrange(a as int, a+len as nat) =~= Seq::new(len as nat, |i| perm@[(a+i) as usize]));
+            r
+        }
+        */
+
         pub fn new(d: Disk) -> (result: (DiskWrap, Tracked<DiskView>))
+            requires
+                d.inv(),
             ensures
                 result.0.inv(),
                 result.1@.valid(result.0.id()),
