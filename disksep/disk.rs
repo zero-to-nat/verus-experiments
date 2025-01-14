@@ -1,36 +1,35 @@
-use std::collections::HashMap;
 use vstd::prelude::*;
 
 verus! {
     broadcast use vstd::std_specs::hash::group_hash_axioms;
 
     pub struct Disk {
-        store: HashMap<u64, u8>,
+        store: Vec<u8>,
     }
 
     impl Disk {
-        pub closed spec fn view(&self) -> Map<u64, u8>
+        pub closed spec fn view(&self) -> Seq<u8>
         {
             self.store@
         }
 
-        pub fn read(&self, a: u64) -> (result: u8)
+        pub fn read(&self, a: usize) -> (result: u8)
             requires
-                self@.contains_key(a)
+                a < self@.len()
             ensures
-                result == self@[a]
+                result == self@[a as int]
         {
-            *self.store.get(&a).unwrap()
+            self.store[a]
         }
 
-        pub fn write(&mut self, a: u64, v: u8)
+        pub fn write(&mut self, a: usize, v: u8)
             requires
-                old(self)@.dom().contains(a)
+                a < old(self)@.len()
             ensures
-                self@ == old(self)@.insert(a, v)
+                self@ == old(self)@.update(a as int, v)
         {
-            self.store.insert(a, v);
-            ()
+            // XXX Where is Vec::set() coming from?
+            self.store.set(a, v);
         }
     }
 }
