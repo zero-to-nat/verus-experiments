@@ -31,5 +31,16 @@ verus! {
             // XXX Where is Vec::set() coming from?
             self.store.set(a, v);
         }
+
+        pub fn new(n: usize) -> (result: Disk)
+            ensures
+                result@ =~= Seq::<u8>::new(n as nat, |i: int| 0)
+        {
+            let mut store = Vec::new();
+            store.resize(n, 0);
+            Disk{
+                store: store
+            }
+        }
     }
 }

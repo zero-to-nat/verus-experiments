@@ -13,15 +13,6 @@ verus! {
         frac: Option<Map<K, V>>,
     }
 
-    impl<K, V> MapView<K, V> {
-        spec fn new(m: Map<K, V>) -> Self {
-            MapView {
-                auth: Some(Some(m)),
-                frac: Some(Map::empty()),
-            }
-        }
-    }
-
     broadcast proof fn lemma_submap_of_trans<K, V>(m1: Map<K, V>, m2: Map<K, V>, m3: Map<K, V>)
         requires
             #[trigger] m1.submap_of(m2),
@@ -172,27 +163,55 @@ verus! {
             let tracked mut r = Resource::alloc(MapView::<K, V>::unit());
             tracked_swap(&mut self.r, &mut r);
 
-            let ghost rr = MapView {
+            let rr = MapView {
                 auth: Some(Some(r.value().auth.unwrap().unwrap().union_prefer_right(m))),
                 frac: Some(m),
             };
 
             let tracked r_upd = r.update(rr);
 
-            let ghost arr = MapView {
+            let arr = MapView {
                 auth: r_upd.value().auth,
                 frac: Some(Map::empty()),
             };
 
-            let ghost frr = MapView {
+            let frr = MapView {
                 auth: None,
                 frac: r_upd.value().frac,
             };
 
-            assert(r_upd.value().frac == MapView::op(arr, frr).frac);
+            assert(r_upd.value() == MapView::op(arr, frr));
             let tracked (ar, fr) = r_upd.split(arr, frr);
             self.r = ar;
             MapFrac { r: fr }
+        }
+
+        pub proof fn new(m: Map<K, V>) -> (tracked result: (MapAuth<K, V>, MapFrac<K, V>))
+            ensures
+                result.0.inv(),
+                result.1.inv(),
+                result.0.id() == result.1.id(),
+                result.0@ == m,
+                result.1@ == m,
+        {
+            let tracked rr = Resource::alloc(MapView{
+                auth: Some(Some(m)),
+                frac: Some(m),
+            });
+
+            let arr = MapView{
+                auth: Some(Some(m)),
+                frac: Some(Map::empty()),
+            };
+
+            let frr = MapView{
+                auth: None,
+                frac: Some(m),
+            };
+
+            assert(rr.value() == MapView::op(arr, frr));
+            let tracked (ar, fr) = rr.split(arr, frr);
+            (MapAuth { r: ar }, MapFrac { r: fr })
         }
     }
 
@@ -278,17 +297,17 @@ verus! {
                 result.id() == self.id(),
                 old(self)@ == self@.union_prefer_right(result@),
                 result@.dom() =~= s,
-                self@.dom().disjoint(result@.dom()),
+                self@.dom() =~= old(self)@.dom() - s,
         {
             let tracked mut r = Resource::alloc(MapView::<K, V>::unit());
             tracked_swap(&mut self.r, &mut r);
 
-            let ghost rr1 = MapView {
+            let rr1 = MapView {
                 auth: None,
                 frac: Some(r.value().frac.unwrap().remove_keys(s)),
             };
 
-            let ghost rr2 = MapView {
+            let rr2 = MapView {
                 auth: None,
                 frac: Some(r.value().frac.unwrap().restrict(s)),
             };
@@ -327,19 +346,19 @@ verus! {
 
             assert(r.value().frac == fr.value().frac);
 
-            let ghost rr = MapView {
+            let rr = MapView {
                 auth: Some(Some(r.value().auth.unwrap().unwrap().union_prefer_right(m))),
                 frac: Some(r.value().frac.unwrap().union_prefer_right(m)),
             };
 
             let tracked r_upd = r.update(rr);
 
-            let ghost arr = MapView {
+            let arr = MapView {
                 auth: r_upd.value().auth,
                 frac: Some(Map::empty()),
             };
 
-            let ghost frr = MapView {
+            let frr = MapView {
                 auth: None,
                 frac: r_upd.value().frac,
             };
