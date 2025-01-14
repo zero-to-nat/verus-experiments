@@ -7,6 +7,7 @@ use vstd::modes::*;
 
 verus! {
     #[verifier::reject_recursive_types(K)]
+    #[verifier::ext_equal]
     struct MapView<K, V> {
         auth: Option<Option<Map<K, V>>>,
         frac: Option<Map<K, V>>,
@@ -21,12 +22,12 @@ verus! {
         }
     }
 
-    proof fn submap_of_trans<K, V>(m1: Map<K, V>, m2: Map<K, V>, m3: Map<K, V>)
+    broadcast proof fn lemma_submap_of_trans<K, V>(m1: Map<K, V>, m2: Map<K, V>, m3: Map<K, V>)
         requires
-            m1 <= m2,
-            m2 <= m3,
+            #[trigger] m1.submap_of(m2),
+            #[trigger] m2.submap_of(m3),
         ensures
-            m1 <= m3
+            m1.submap_of(m3),
     {
         assert forall |k: K| m1.dom().contains(k) implies #[trigger] m3.dom().contains(k) && m1[k] == m3[k] by {
             assert(m2.dom().contains(k) && m1[k] == m2[k]);
@@ -72,20 +73,14 @@ verus! {
         }
 
         proof fn closed_under_incl(a: Self, b: Self) {
-            let ab = Self::op(a, b);
-            assert(ab.valid());
-            match a.auth {
-                None => (),
-                Some(aa) => {
-                    submap_of_trans(a.frac.unwrap(), ab.frac.unwrap(), aa.unwrap());
-                }
-            }
+            broadcast use lemma_submap_of_trans;
+            broadcast use lemma_op_frac_submap_of;
         }
 
         proof fn commutative(a: Self, b: Self) {
             let ab = Self::op(a, b);
             let ba = Self::op(b, a);
-            assert(ab.frac == ba.frac);
+            assert(ab == ba);
         }
 
         proof fn associative(a: Self, b: Self, c: Self) {
@@ -93,16 +88,25 @@ verus! {
             let ab = Self::op(a, b);
             let a_bc = Self::op(a, bc);
             let ab_c = Self::op(ab, c);
-            assert(a_bc.frac == ab_c.frac);
+            assert(a_bc == ab_c);
         }
 
         proof fn op_unit(a: Self) {
             let x = Self::op(a, Self::unit());
-            assert(a.frac == x.frac);
+            assert(a == x);
         }
 
         proof fn unit_valid() {
         }
+    }
+
+    broadcast proof fn lemma_op_frac_submap_of<K, V>(a: MapView<K, V>, b: MapView<K, V>)
+        requires
+            #[trigger] MapView::op(a, b).valid(),
+        ensures
+            a.frac.unwrap() <= MapView::op(a, b).frac.unwrap(),
+            b.frac.unwrap() <= MapView::op(a, b).frac.unwrap(),
+    {
     }
 
     #[verifier::reject_recursive_types(K)]
@@ -162,6 +166,9 @@ verus! {
                 result.id() == self.id(),
                 result@ == m,
         {
+            broadcast use lemma_submap_of_trans;
+            broadcast use lemma_op_frac_submap_of;
+
             let tracked mut r = Resource::alloc(MapView::<K, V>::unit());
             tracked_swap(&mut self.r, &mut r);
 
@@ -170,9 +177,6 @@ verus! {
                 frac: Some(m),
             };
 
-            assert forall |c| #[trigger] MapView::op(r.value(), c).valid() implies MapView::op(rr, c).valid() by {
-                submap_of_trans(c.frac.unwrap(), MapView::op(r.value(), c).frac.unwrap(), r.value().auth.unwrap().unwrap());
-            };
             let tracked r_upd = r.update(rr);
 
             let ghost arr = MapView {
@@ -240,11 +244,11 @@ verus! {
             ensures
                 self@ <= auth@
         {
+            broadcast use lemma_submap_of_trans;
+
             let tracked joined = self.r.join_shared(&auth.r);
             joined.validate();
-            submap_of_trans(self.r.value().frac.unwrap(),
-                            joined.value().frac.unwrap(),
-                            auth.r.value().auth.unwrap().unwrap());
+            assert(self.r.value().frac.unwrap() <= joined.value().frac.unwrap());
         }
 
         pub proof fn combine(tracked &mut self, tracked other: MapFrac<K, V>)
@@ -309,6 +313,9 @@ verus! {
                 self@ == old(self)@.union_prefer_right(m),
                 auth@ == old(auth)@.union_prefer_right(m),
         {
+            broadcast use lemma_submap_of_trans;
+            broadcast use lemma_op_frac_submap_of;
+
             let tracked mut fr = Resource::alloc(MapView::<K, V>::unit());
             tracked_swap(&mut self.r, &mut fr);
 
@@ -325,9 +332,6 @@ verus! {
                 frac: Some(r.value().frac.unwrap().union_prefer_right(m)),
             };
 
-            assert forall |c| #[trigger] MapView::op(r.value(), c).valid() implies MapView::op(rr, c).valid() by {
-                submap_of_trans(c.frac.unwrap(), MapView::op(r.value(), c).frac.unwrap(), r.value().auth.unwrap().unwrap());
-            };
             let tracked r_upd = r.update(rr);
 
             let ghost arr = MapView {
