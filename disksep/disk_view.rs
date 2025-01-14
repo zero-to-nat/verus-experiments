@@ -10,15 +10,15 @@ verus! {
 
     type DiskView = MapFrac<usize, u8>;
 
-    pub open spec fn seq_to_map<V>(s: Seq<V>) -> Map<usize, V>
+    pub open spec fn seq_to_map<V>(off: nat, s: Seq<V>) -> Map<usize, V>
     {
-        Map::new(|i: usize| i < s.len(), |i: usize| s[i as int])
+        Map::new(|i: usize| off <= i < off + s.len(), |i: usize| s[i - off])
     }
 
     pub struct DiskAddr {
-        addr: usize,
-        len: Ghost<nat>,
-        perm: Tracked<DiskView>,
+        pub addr: usize,
+        pub len: Ghost<nat>,
+        pub perm: Tracked<DiskView>,
     }
 
     impl DiskAddr {
@@ -107,8 +107,7 @@ verus! {
             }
         }
 
-/*
-        pub fn read_range(&self, a: usize, len: usize, Tracked(perm): Tracked<&DiskView>) -> (result: Vec<u8>)
+        pub fn read(&self, a: usize, len: usize, Tracked(perm): Tracked<&DiskView>) -> (result: Vec<u8>)
             requires
                 self.inv(),
                 perm.valid(self.id()),
@@ -124,7 +123,52 @@ verus! {
             assert(self.d@.subrange(a as int, a+len as nat) =~= Seq::new(len as nat, |i| perm@[(a+i) as usize]));
             r
         }
-        */
+
+        pub fn read_wrapped(&self, a: &DiskAddr, len: usize) -> (result: Vec<u8>)
+            requires
+                self.inv(),
+                a.valid(self.id()),
+                len == a@.len(),
+            ensures
+                result@ == a@,
+        {
+            self.read(a.addr, len, Tracked(a.perm.borrow()))
+        }
+
+        pub fn write(&mut self, a: usize, v: &[u8], Tracked(perm): Tracked<&mut DiskView>)
+            requires
+                old(self).inv(),
+                old(perm).valid(old(self).id()),
+                Set::<usize>::new(|i| a <= i < a + v@.len()) <= old(perm)@.dom(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                perm.valid(self.id()),
+                perm@ =~= old(perm)@.union_prefer_right(seq_to_map(a as nat, v@)),
+        {
+            proof {
+                perm.agree(self.a.borrow());
+            }
+            self.d.write(a, v);
+            proof {
+                perm.update(self.a.borrow_mut(), seq_to_map(a as nat, v@));
+            }
+        }
+
+        pub fn write_wrapped(&mut self, a: &mut DiskAddr, v: &[u8])
+            requires
+                old(self).inv(),
+                old(a).valid(old(self).id()),
+                old(a)@.len() == v@.len(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                a.valid(self.id()),
+                a.addr == old(a).addr,
+                a@ == v@,
+        {
+            self.write(a.addr, v, Tracked(a.perm.borrow_mut()));
+        }
 
         pub fn new(d: Disk) -> (result: (DiskWrap, Tracked<DiskView>))
             requires
@@ -132,9 +176,9 @@ verus! {
             ensures
                 result.0.inv(),
                 result.1@.valid(result.0.id()),
-                result.1@@ == seq_to_map(d@),
+                result.1@@ == seq_to_map(0, d@),
         {
-            let tracked (ar, fr) = MapAuth::<usize, u8>::new(seq_to_map(d@));
+            let tracked (ar, fr) = MapAuth::<usize, u8>::new(seq_to_map(0, d@));
             (DiskWrap{ d: d, a: Tracked(ar) }, Tracked(fr))
         }
     }

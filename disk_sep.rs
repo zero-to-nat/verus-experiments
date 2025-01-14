@@ -29,10 +29,31 @@ verus! {
         let x = dw.read_one(4, Tracked(&f4));
         assert(x == 124);
 
-        let a0 = DiskAddr::new(0, Ghost(4), Tracked(f0));
-        let a4 = DiskAddr::new(4, Ghost(4), Tracked(f4));
+        let x = dw.read(0, 4, Tracked(&f0));
+        assert(x@ == seq![120u8, 121u8, 122u8, 123u8]);
+
+        let x = dw.read(4, 4, Tracked(&f4));
+        assert(x@ == seq![124u8, 125u8, 126u8, 127u8]);
+
+        let mut a0 = DiskAddr::new(0, Ghost(4), Tracked(f0));
+        let mut a4 = DiskAddr::new(4, Ghost(4), Tracked(f4));
 
         assert(a0@ == seq![120u8, 121u8, 122u8, 123u8]);
         assert(a4@ == seq![124u8, 125u8, 126u8, 127u8]);
+
+        let x = dw.read_wrapped(&a0, 4);
+        assert(x@ == a0@);
+
+        let x = dw.read_wrapped(&a4, 4);
+        assert(x@ == a4@);
+
+        dw.write_wrapped(&mut a0, &[10, 11, 12, 13]);
+        dw.write_wrapped(&mut a4, &[14, 15, 16, 17]);
+
+        assert(a0@ == seq![10u8, 11u8, 12u8, 13u8]);
+        assert(a4@ == seq![14u8, 15u8, 16u8, 17u8]);
+
+        let x = dw.read_wrapped(&a0, 4);
+        assert(x@ == a0@);
     }
 }
