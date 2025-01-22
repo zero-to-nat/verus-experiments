@@ -17,7 +17,7 @@ verus! {
         pub closed spec fn inv(self) -> bool
         {
             &&& self.auth.inv()
-            &&& self.auth@.dom() =~= Set::new(|i: int| i < self.len)
+            &&& self.auth@.dom() =~= Set::new(|i: int| 0 <= i < self.len)
         }
 
         pub closed spec fn id(self) -> int
@@ -31,11 +31,13 @@ verus! {
         }
 
         pub proof fn new(s: Seq<V>) -> (tracked result: (SeqAuth<V>, SeqFrac<V>))
+            requires
+                s.len() > 0,
             ensures
                 result.0.inv(),
-                result.0@ == s,
+                result.0@ =~= s,
                 result.1.valid(result.0.id()),
-                result.1@ == s,
+                result.1@ =~= s,
         {
             let tracked (mauth, mfrac) = MapAuth::<int, V>::new(Map::new(|i| 0 <= i < s.len(), |i: int| s[i]));
             let tracked auth = SeqAuth{
