@@ -1,5 +1,6 @@
 use vstd::pcm::*;
 use vstd::map::*;
+use vstd::map_lib::*;
 use vstd::prelude::*;
 use vstd::modes::*;
 
@@ -11,18 +12,6 @@ verus! {
     struct MapView<K, V> {
         auth: Option<Option<Map<K, V>>>,
         frac: Option<Map<K, V>>,
-    }
-
-    broadcast proof fn lemma_submap_of_trans<K, V>(m1: Map<K, V>, m2: Map<K, V>, m3: Map<K, V>)
-        requires
-            #[trigger] m1.submap_of(m2),
-            #[trigger] m2.submap_of(m3),
-        ensures
-            m1.submap_of(m3),
-    {
-        assert forall |k: K| m1.dom().contains(k) implies #[trigger] m3.dom().contains(k) && m1[k] == m3[k] by {
-            assert(m2.dom().contains(k) && m1[k] == m2[k]);
-        }
     }
 
     impl<K, V> PCM for MapView<K, V> {
