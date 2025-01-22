@@ -2,12 +2,12 @@ use vstd::prelude::*;
 use super::map_view::*;
 
 verus! {
-    struct SeqAuth<V> {
+    pub struct SeqAuth<V> {
         ghost len: nat,
         auth: MapAuth<int, V>,
     }
 
-    struct SeqFrac<V> {
+    pub struct SeqFrac<V> {
         ghost off: nat,
         ghost len: nat,
         frac: MapFrac<int, V>,
@@ -37,6 +37,7 @@ verus! {
                 result.0.inv(),
                 result.0@ =~= s,
                 result.1.valid(result.0.id()),
+                result.1.off() == 0,
                 result.1@ =~= s,
         {
             let tracked (mauth, mfrac) = MapAuth::<int, V>::new(Map::new(|i| 0 <= i < s.len(), |i: int| s[i]));
@@ -87,7 +88,9 @@ verus! {
                 self.valid(auth.id()),
                 auth.inv(),
             ensures
-                self@ =~= auth@.subrange(self.off() as int, self.off() + self@.len() as int)
+                self@ =~= auth@.subrange(self.off() as int, self.off() + self@.len() as int),
+                self@.len() > 0,
+                self.off() + self@.len() <= auth@.len(),
         {
             self.frac.agree(&auth.auth);
 
@@ -108,10 +111,11 @@ verus! {
                 v.len() == old(self)@.len(),
             ensures
                 self.valid(auth.id()),
+                self.off() == old(self).off(),
                 auth.inv(),
                 auth.id() == old(auth).id(),
                 self@ =~= v,
-                auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() <= i < self.off() + self@.len() { v[i - self.off()] } else { old(auth)@[i] }),
+                auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() <= i < self.off() + v.len() { v[i - self.off()] } else { old(auth)@[i] }),
         {
             let vmap = Map::new(|i| self.off <= i < self.off + self.len, |i: int| v[i - self.off]);
             self.frac.agree(&auth.auth);
@@ -126,7 +130,9 @@ verus! {
                 self.inv(),
                 result.inv(),
                 self.id() == old(self).id(),
+                self.off() == old(self).off(),
                 result.id() == self.id(),
+                result.off() == old(self).off() + n,
                 self@ =~= old(self)@.subrange(0, n),
                 result@ =~= old(self)@.subrange(n, old(self)@.len() as int),
         {
