@@ -1,6 +1,5 @@
 use builtin::*;
 use vstd::prelude::*;
-use vstd::invariant::*;
 use vstd::proph::*;
 
 pub mod frac;
@@ -73,31 +72,19 @@ verus! {
         }
     }
 
-    pub trait DiskReadPermission where Self: Sized {
-        type Result;
+    pub struct DiskReadOp {
+        pub id: int,
+        pub addr: u8,
+    }
 
-        spec fn namespace(&self) -> int;
-        spec fn addr(&self) -> u8;
-        spec fn id(&self) -> int;
-        spec fn pre(&self) -> bool;
-        spec fn post(&self, r: Self::Result, v: u8) -> bool;
-        proof fn validate(tracked &self, tracked r: &Frac<MemCrashView>, tracked credit: OpenInvariantCredit)
-            requires
-                self.pre(),
-                r.valid(self.id(), 1),
-            ensures
-                self.addr() == 0 || self.addr() == 1,
-            opens_invariants
-                [ self.namespace() ];
-        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>, v: u8) -> (tracked result: Self::Result)
-            requires
-                self.pre(),
-                r.valid(self.id(), 1),
-                v == view_read(r@.mem, self.addr()),
-            ensures
-                self.post(result, v),
-            opens_invariants
-                [ self.namespace() ];
+    impl logatom::ReadOperation for DiskReadOp {
+        type Resource = Frac<MemCrashView>;
+        type ExecResult = u8;
+
+        open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            &&& r.valid(self.id, 1)
+            &&& e == view_read(r@.mem, self.addr)
+        }
     }
 
     pub struct Disk
@@ -195,27 +182,20 @@ verus! {
             }
         }
 
-        pub fn read<Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<Perm::Result>))
+        pub fn read<Perm>(&mut self, addr: u8, Tracked(perm): Tracked<Perm>) -> (result: (u8, Tracked<Perm::ApplyResult>))
             where
-                Perm: DiskReadPermission
+                Perm: logatom::ReadLinearizer<DiskReadOp>
             requires
                 old(self).inv(),
-                perm.pre(),
-                perm.addr() == addr,
-                perm.id() == old(self).id(),
+                perm.pre(DiskReadOp{ id: old(self).id(), addr: addr }),
+                addr == 0 || addr == 1,
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.post(result.1@, result.0),
+                perm.post(DiskReadOp{ id: old(self).id(), addr: addr }, result.0, result.1@),
         {
-            // Just to make sure validation works, try to invoke validate().
-            let credit = create_open_invariant_credit();
-            proof {
-                perm.validate(self.frac.borrow_mut(), credit.get())
-            };
-
             let v = if addr == 0 { self.block0[self.block0.len()-1] } else { self.block1[self.block1.len()-1] };
-            (v, Tracked(perm.apply(self.frac.borrow_mut(), v)))
+            (v, Tracked(perm.apply(DiskReadOp{ id: old(self).id(), addr: addr }, self.frac.borrow_mut(), &v)))
         }
 
         pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)

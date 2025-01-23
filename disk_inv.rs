@@ -14,7 +14,6 @@ use disk::view_read;
 use disk::view_write;
 use disk::frac;
 use disk::Disk;
-use disk::DiskReadPermission;
 
 verus! {
     pub type AbsView = u8;
@@ -191,46 +190,36 @@ verus! {
 
     pub struct InvReadPerm
     {
-        pub a: u8,
         pub tracked disk2_frac: Frac<MemCrashView>,
         pub tracked app_frac: Frac<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
 
-    impl DiskReadPermission for InvReadPerm
+    impl logatom::ReadLinearizer<disk::DiskReadOp> for InvReadPerm
     {
-        type Result = InvPermResult;
+        type ApplyResult = InvPermResult;
 
-        open spec fn namespace(&self) -> int { self.inv.namespace() }
-        open spec fn id(&self) -> int { self.inv.constant().disk_id }
-        open spec fn addr(&self) -> u8 { self.a }
+        open spec fn namespace(self) -> int { self.inv.namespace() }
 
-        open spec fn pre(&self) -> bool {
-            self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-            ( self.addr() == 0 || self.addr() == 1 )
+        open spec fn pre(self, op: disk::DiskReadOp) -> bool {
+            &&& self.inv.constant().disk_id == op.id
+            &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
+            &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& ( op.addr == 0 || op.addr == 1)
         }
 
-        open spec fn post(&self, r: InvPermResult, v: u8) -> bool {
-            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
+        open spec fn post(self, op: disk::DiskReadOp, v: u8, r: InvPermResult) -> bool {
+            &&& r.disk2_frac.valid(self.inv.constant().disk2_id, 1)
+            &&& r.app_frac.valid(self.inv.constant().abs_id, 1)
 
-            r.disk2_frac@ == self.disk2_frac@ &&
-            r.app_frac@ == self.app_frac@ &&
+            &&& r.disk2_frac@ == self.disk2_frac@
+            &&& r.app_frac@ == self.app_frac@
 
-            v == view_read(r.disk2_frac@.mem, self.addr())
+            &&& v == view_read(r.disk2_frac@.mem, op.addr)
         }
 
-        proof fn validate(tracked &self, tracked r: &Frac<MemCrashView>, tracked credit: OpenInvariantCredit)
-        {
-            let tracked mut mself = self;
-            open_atomic_invariant!(credit => &mself.inv => inner => {
-                r.agree(&inner.disk)
-            });
-        }
-
-        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>, v: u8) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: disk::DiskReadOp, tracked r: &Frac<MemCrashView>, v: &u8) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
@@ -272,12 +261,12 @@ verus! {
         let tracked i = Arc::new(i);
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
@@ -289,12 +278,12 @@ verus! {
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
@@ -315,12 +304,12 @@ verus! {
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 0u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x0, Tracked(res)) = d.read::<InvReadPerm>(0, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
         let credit = create_open_invariant_credit();
-        let tracked fupd = InvReadPerm{ a: 1u8, disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
+        let tracked fupd = InvReadPerm{ disk2_frac: disk_r, app_frac: app_r, inv: i.clone(), credit: credit.get() };
         let (x1, Tracked(res)) = d.read::<InvReadPerm>(1, Tracked(fupd));
         let tracked InvPermResult{ disk2_frac: disk_r, app_frac: app_r } = res;
 
