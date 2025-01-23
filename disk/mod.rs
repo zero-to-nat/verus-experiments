@@ -35,28 +35,28 @@ verus! {
         pub crash: DiskView,
     }
 
-    pub trait DiskWritePermission where Self: Sized {
-        type Result;
+    pub struct DiskWriteOp {
+        pub id: int,
+        pub addr: u8,
+        pub val: u8,
+        pub write_crash: bool,
+    }
 
-        spec fn namespace(&self) -> int;
-        spec fn addr(&self) -> u8;
-        spec fn val(&self) -> u8;
-        spec fn id(&self) -> int;
-        spec fn pre(&self) -> bool;
-        spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Self::Result)
-            requires
-                self.pre(),
-                old(r).valid(self.id(), 1),
-            ensures
-                r.valid(self.id(), 1),
-                r@ == (MemCrashView{
-                    mem: view_write(old(r)@.mem, self.addr(), self.val()),
-                    crash: if write_crash { view_write(old(r)@.crash, self.addr(), self.val()) } else { old(r)@.crash },
-                }),
-                self.post(result),
-            opens_invariants
-                [ self.namespace() ];
+    impl logatom::MutOperation for DiskWriteOp {
+        type Resource = Frac<MemCrashView>;
+        type ExecResult = ();
+
+        open spec fn requires(self, r: Self::Resource, e: ()) -> bool {
+            r.valid(self.id, 1)
+        }
+
+        open spec fn ensures(self, pre: Self::Resource, post: Self::Resource) -> bool {
+            &&& post.valid(self.id, 1)
+            &&& post@ == MemCrashView{
+                mem: view_write(pre@.mem, self.addr, self.val),
+                crash: if self.write_crash { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash },
+            }
+        }
     }
 
     pub struct DiskBarrierOp {
@@ -218,19 +218,16 @@ verus! {
             (v, Tracked(perm.apply(self.frac.borrow_mut(), v)))
         }
 
-        pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Result>)
+        pub fn write<Perm>(&mut self, addr: u8, val: u8, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)
             where
-                Perm: DiskWritePermission
+                Perm: logatom::MutLinearizer<DiskWriteOp>
             requires
                 old(self).inv(),
-                perm.pre(),
-                perm.addr() == addr,
-                perm.val() == val,
-                perm.id() == old(self).id(),
+                forall|wc| #[trigger] perm.pre(DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: wc}),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.post(result@),
+                exists|wc| #[trigger] perm.post(DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: wc }, (), result@),
         {
             if addr == 0 {
                 self.block0.push(val);
@@ -262,7 +259,8 @@ verus! {
                     assert(self.durable.1 == proph_value(self.block1, self.proph1));
                 }
 
-                perm.apply(self.frac.borrow_mut(), write_crash)
+                let op = DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: write_crash };
+                perm.apply(op, self.frac.borrow_mut(), &())
             })
         }
 
@@ -280,14 +278,14 @@ verus! {
 
         pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)
             where
-                Perm: logatom::LinearizeRead<DiskBarrierOp>
+                Perm: logatom::ReadLinearizer<DiskBarrierOp>
             requires
                 old(self).inv(),
-                perm.inv(DiskBarrierOp{ id: old(self).id() }),
+                perm.pre(DiskBarrierOp{ id: old(self).id() }),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.post((), result@),
+                perm.post(DiskBarrierOp{ id: self.id() }, (), result@),
         {
             let mut proph0 = Prophecy::<u8>::new();
             let mut proph1 = Prophecy::<u8>::new();

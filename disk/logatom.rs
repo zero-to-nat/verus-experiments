@@ -16,49 +16,53 @@ verus! {
         spec fn ensures(self, pre: Self::Resource, post: Self::Resource) -> bool;
     }
 
-    pub trait LinearizeRead<Op: ReadOperation> : Sized {
+    pub trait ReadLinearizer<Op: ReadOperation> : Sized {
         type ApplyResult /* = () */;
-
-        spec fn inv(self, op: Op) -> bool;
 
         open spec fn namespace(self) -> int {
             0
         }
 
-        open spec fn post(self, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
+        open spec fn pre(self, op: Op) -> bool {
+            true
+        }
+
+        open spec fn post(self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
             true
         }
 
         proof fn apply(tracked self, op: Op, tracked r: &Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
             requires
-                self.inv(op),
+                self.pre(op),
                 op.requires(*r, *e),
             ensures
-                self.post(*e, out),
+                self.post(op, *e, out),
             opens_invariants
                 [ self.namespace() ];
     }
 
-    pub trait LinearizeMut<Op: MutOperation> : Sized {
+    pub trait MutLinearizer<Op: MutOperation> : Sized {
         type ApplyResult /* = () */;
-
-        spec fn inv(self, op: Op) -> bool;
 
         open spec fn namespace(self) -> int {
             0
         }
 
-        open spec fn post(self, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
+        open spec fn pre(self, op: Op) -> bool {
+            true
+        }
+
+        open spec fn post(self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
             true
         }
 
         proof fn apply(tracked self, op: Op, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
             requires
-                self.inv(op),
+                self.pre(op),
                 op.requires(*old(r), *e),
             ensures
                 op.ensures(*old(r), *r),
-                self.post(*e, out),
+                self.post(op, *e, out),
             opens_invariants
                 [ self.namespace() ];
     }

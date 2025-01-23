@@ -15,7 +15,6 @@ use disk::view_write;
 use disk::frac;
 use disk::Disk;
 use disk::DiskReadPermission;
-use disk::DiskWritePermission;
 
 verus! {
     pub type AbsView = u8;
@@ -77,49 +76,46 @@ verus! {
         pub tracked credit: OpenInvariantCredit,
     }
 
-    impl DiskWritePermission for InvWritePerm
+    impl logatom::MutLinearizer<disk::DiskWriteOp> for InvWritePerm
     {
-        type Result = InvPermResult;
+        type ApplyResult = InvPermResult;
 
-        open spec fn namespace(&self) -> int { self.inv.namespace() }
-        open spec fn id(&self) -> int { self.inv.constant().disk_id }
-        open spec fn addr(&self) -> u8 { self.a }
-        open spec fn val(&self) -> u8 { self.v }
+        open spec fn namespace(self) -> int { self.inv.namespace() }
 
-        open spec fn pre(&self) -> bool {
-            self.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            self.app_frac.valid(self.inv.constant().abs_id, 1) &&
-
-            if self.addr() == 0 {
-                self.val() <= self.disk2_frac@.mem.1 &&
-                self.val() <= self.disk2_frac@.crash.1
-            } else {
-                self.val() >= self.disk2_frac@.mem.0 &&
-                self.val() >= self.disk2_frac@.crash.0
-            }
+        open spec fn pre(self, op: disk::DiskWriteOp) -> bool {
+            &&& op.id == self.inv.constant().disk_id
+            &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
+            &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& if op.addr == 0 {
+                    op.val <= self.disk2_frac@.mem.1 &&
+                    op.val <= self.disk2_frac@.crash.1
+                } else {
+                    op.val >= self.disk2_frac@.mem.0 &&
+                    op.val >= self.disk2_frac@.crash.0
+                }
         }
 
-        open spec fn post(&self, r: InvPermResult) -> bool {
-            r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            r.disk2_frac@.mem == view_write(self.disk2_frac@.mem, self.addr(), self.val()) &&
-            ( r.disk2_frac@.crash == self.disk2_frac@.crash ||
-              r.disk2_frac@.crash == view_write(self.disk2_frac@.crash, self.addr(), self.val()) ) &&
+        open spec fn post(self, op: disk::DiskWriteOp, er: (), r: InvPermResult) -> bool {
+            &&& r.disk2_frac.valid(self.inv.constant().disk2_id, 1)
+            &&& r.disk2_frac@.mem == view_write(self.disk2_frac@.mem, op.addr, op.val)
+            &&& ( r.disk2_frac@.crash == self.disk2_frac@.crash ||
+                  r.disk2_frac@.crash == view_write(self.disk2_frac@.crash, op.addr, op.val) )
 
-            r.app_frac.valid(self.inv.constant().abs_id, 1) &&
-            r.app_frac@.mem == if self.addr() == 0 { self.val() } else { self.app_frac@.mem } &&
-            ( r.app_frac@.crash == self.app_frac@.crash ||
-              ( self.addr() == 0 && r.app_frac@.crash == self.val() ) )
+            &&& r.app_frac.valid(self.inv.constant().abs_id, 1)
+            &&& r.app_frac@.mem == if op.addr == 0 { op.val } else { self.app_frac@.mem }
+            &&& ( r.app_frac@.crash == self.app_frac@.crash ||
+                  ( op.addr == 0 && r.app_frac@.crash == op.val ) )
         }
 
-        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, op: disk::DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             let tracked mut ires;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
                 r.combine(inner.disk);
                 r.update(MemCrashView{
-                        mem: view_write(r@.mem, mself.addr(), mself.val()),
-                        crash: if write_crash { view_write(r@.crash, mself.addr(), mself.val()) } else { r@.crash },
+                        mem: view_write(r@.mem, op.addr, op.val),
+                        crash: if op.write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                     });
                 inner.disk = r.split(1);
 
@@ -127,11 +123,11 @@ verus! {
                 mself.disk2_frac.update(inner.disk@);
                 inner.disk2 = mself.disk2_frac.split(1);
 
-                if mself.addr() == 0 {
+                if op.addr == 0 {
                     mself.app_frac.combine(inner.abs);
                     mself.app_frac.update(AbsPair{
-                        mem: mself.val(),
-                        crash: if write_crash { mself.val() } else { mself.app_frac@.crash },
+                        mem: op.val,
+                        crash: if op.write_crash { op.val } else { mself.app_frac@.crash },
                     });
                     inner.abs = mself.app_frac.split(1)
                 };
@@ -154,19 +150,19 @@ verus! {
         pub tracked credit: OpenInvariantCredit,
     }
 
-    impl logatom::LinearizeRead<disk::DiskBarrierOp> for InvBarrierPerm
+    impl logatom::ReadLinearizer<disk::DiskBarrierOp> for InvBarrierPerm
     {
         type ApplyResult = InvPermResult;
 
         open spec fn namespace(self) -> int { self.inv.namespace() }
 
-        open spec fn inv(self, op: disk::DiskBarrierOp) -> bool {
+        open spec fn pre(self, op: disk::DiskBarrierOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
             &&& self.disk2_frac.valid(self.inv.constant().disk2_id, 1)
             &&& self.app_frac.valid(self.inv.constant().abs_id, 1)
         }
 
-        open spec fn post(self, er: (), r: InvPermResult) -> bool {
+        open spec fn post(self, op: disk::DiskBarrierOp, er: (), r: InvPermResult) -> bool {
             r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             r.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
