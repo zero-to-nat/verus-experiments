@@ -4,6 +4,7 @@ use vstd::invariant::*;
 use vstd::proph::*;
 
 pub mod frac;
+pub mod logatom;
 
 use frac::Frac;
 
@@ -58,22 +59,18 @@ verus! {
                 [ self.namespace() ];
     }
 
-    pub trait DiskBarrierPermission where Self: Sized {
-        type Result;
+    pub struct DiskBarrierOp {
+        pub id: int,
+    }
 
-        spec fn namespace(&self) -> int;
-        spec fn id(&self) -> int;
-        spec fn pre(&self) -> bool;
-        spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>) -> (tracked result: Self::Result)
-            requires
-                self.pre(),
-                r.valid(self.id(), 1),
-                r@.mem == r@.crash,
-            ensures
-                self.post(result),
-            opens_invariants
-                [ self.namespace() ];
+    impl logatom::ReadOperation for DiskBarrierOp {
+        type Resource = Frac<MemCrashView>;
+        type ExecResult = ();
+
+        open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            &&& r.valid(self.id, 1)
+            &&& r@.mem == r@.crash
+        }
     }
 
     pub trait DiskReadPermission where Self: Sized {
@@ -281,17 +278,16 @@ verus! {
             unimplemented!()
         }
 
-        pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::Result>)
+        pub fn barrier<Perm>(&mut self, Tracked(perm): Tracked<Perm>) -> (result: Tracked<Perm::ApplyResult>)
             where
-                Perm: DiskBarrierPermission
+                Perm: logatom::LinearizeRead<DiskBarrierOp>
             requires
                 old(self).inv(),
-                perm.pre(),
-                perm.id() == old(self).id(),
+                perm.inv(DiskBarrierOp{ id: old(self).id() }),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                perm.post(result@),
+                perm.post((), result@),
         {
             let mut proph0 = Prophecy::<u8>::new();
             let mut proph1 = Prophecy::<u8>::new();
@@ -306,7 +302,7 @@ verus! {
             self.block1 = vec![self.block1[self.block1.len()-1]];
 
             assert(self.durable == (self.block0[0], self.block1[0]));
-            Tracked(perm.apply(self.frac.borrow_mut()))
+            Tracked(perm.apply(DiskBarrierOp{ id: old(self).id() }, self.frac.borrow_mut(), &()))
         }
 
         pub fn crash(self)
