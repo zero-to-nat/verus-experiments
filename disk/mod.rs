@@ -5,7 +5,7 @@ use vstd::proph::*;
 
 pub mod frac;
 
-use frac::FractionalResource;
+use frac::Frac;
 
 verus! {
     pub type DiskView = (u8, u8);
@@ -43,15 +43,15 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 old(r).valid(self.id(), 1),
             ensures
                 r.valid(self.id(), 1),
-                r.val() == (MemCrashView{
-                    mem: view_write(old(r).val().mem, self.addr(), self.val()),
-                    crash: if write_crash { view_write(old(r).val().crash, self.addr(), self.val()) } else { old(r).val().crash },
+                r@ == (MemCrashView{
+                    mem: view_write(old(r)@.mem, self.addr(), self.val()),
+                    crash: if write_crash { view_write(old(r)@.crash, self.addr(), self.val()) } else { old(r)@.crash },
                 }),
                 self.post(result),
             opens_invariants
@@ -65,11 +65,11 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result) -> bool;
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
-                r.val().mem == r.val().crash,
+                r@.mem == r@.crash,
             ensures
                 self.post(result),
             opens_invariants
@@ -84,7 +84,7 @@ verus! {
         spec fn id(&self) -> int;
         spec fn pre(&self) -> bool;
         spec fn post(&self, r: Self::Result, v: u8) -> bool;
-        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        proof fn validate(tracked &self, tracked r: &Frac<MemCrashView>, tracked credit: OpenInvariantCredit)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
@@ -92,11 +92,11 @@ verus! {
                 self.addr() == 0 || self.addr() == 1,
             opens_invariants
                 [ self.namespace() ];
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8) -> (tracked result: Self::Result)
+        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>, v: u8) -> (tracked result: Self::Result)
             requires
                 self.pre(),
                 r.valid(self.id(), 1),
-                v == view_read(r.val().mem, self.addr()),
+                v == view_read(r@.mem, self.addr()),
             ensures
                 self.post(result, v),
             opens_invariants
@@ -108,7 +108,7 @@ verus! {
         block0: Vec<u8>,
         block1: Vec<u8>,
         ghost durable: DiskView,    // Prophecy-style crash state
-        frac: Tracked<FractionalResource<MemCrashView, 2>>,
+        frac: Tracked<Frac<MemCrashView>>,
 
         // proph0/proph1 predict which value in prev0/prev1 will be durably
         // written to disk.  If the value is not equal to any of the pending
@@ -140,8 +140,8 @@ verus! {
             self.block0.len() > 0 &&
             self.block1.len() > 0 &&
             self.frac@.inv() &&
-            self.frac@.val().crash == self.durable &&
-            self.frac@.val().mem == (self.block0[self.block0.len()-1], self.block1[self.block1.len()-1]) &&
+            self.frac@@.crash == self.durable &&
+            self.frac@@.mem == (self.block0[self.block0.len()-1], self.block1[self.block1.len()-1]) &&
             self.frac@.frac() == 1 &&
             self.durable.0 == proph_value(self.block0, self.proph0) &&
             self.durable.1 == proph_value(self.block1, self.proph1)
@@ -152,18 +152,18 @@ verus! {
             self.frac@.id()
         }
 
-        pub fn new() -> (res: (Disk, Tracked<FractionalResource::<MemCrashView, 2>>))
+        pub fn new() -> (res: (Disk, Tracked<Frac::<MemCrashView>>))
             requires
                 true,
             ensures
                 res.0.inv(),
                 res.1@.valid(res.0.id(), 1),
-                res.1@.val() == (MemCrashView{
+                res.1@@ == (MemCrashView{
                     mem: (0, 0),
                     crash: (0, 0),
                 }),
         {
-            let tracked r = FractionalResource::<MemCrashView, 2>::new(MemCrashView{
+            let tracked r = Frac::<MemCrashView>::new(MemCrashView{
                 mem: (0, 0),
                 crash: (0, 0),
             });
@@ -180,13 +180,13 @@ verus! {
         }
 
         // Leftover, should really be implemented in terms of the fupd-style read() below.
-        pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&FractionalResource<MemCrashView, 2>>) -> (result: u8)
+        pub fn read_owned(&self, addr: u8, Tracked(f): Tracked<&Frac<MemCrashView>>) -> (result: u8)
             requires
                 self.inv(),
                 f.inv(),
                 f.id() == self.id(),
             returns
-                view_read(f.val().mem, addr)
+                view_read(f@.mem, addr)
         {
             proof {
                 f.agree(self.frac.borrow())
@@ -271,12 +271,12 @@ verus! {
 
         // Leftover, should really be implemented in terms of the fupd-style barrier() below
         #[verifier(external_body)]
-        pub fn barrier_owned(&self, Tracked(f): Tracked<&FractionalResource::<MemCrashView, 2>>)
+        pub fn barrier_owned(&self, Tracked(f): Tracked<&Frac::<MemCrashView>>)
             requires
                 self.inv(),
                 f.valid(self.id(), 1),
             ensures
-                f.val().crash == f.val().mem,
+                f@.crash == f@.mem,
         {
             unimplemented!()
         }

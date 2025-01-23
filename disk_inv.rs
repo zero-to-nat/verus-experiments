@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 mod disk;
 
-use frac::FractionalResource;
+use frac::Frac;
 
 use disk::DiskView;
 use disk::MemCrashView;
@@ -32,13 +32,13 @@ verus! {
 
     pub struct DiskInvState {
         // Actual disk state.
-        disk: FractionalResource<MemCrashView, 2>,
+        disk: Frac<MemCrashView>,
 
         // Re-exporting disk state for applicaton to track intermediate writes.
-        disk2: FractionalResource<MemCrashView, 2>,
+        disk2: Frac<MemCrashView>,
 
         // Abstract state (memory and crash).
-        abs: FractionalResource<AbsPair, 2>,
+        abs: Frac<AbsPair>,
     }
 
     pub struct DiskInvParam {
@@ -55,24 +55,24 @@ verus! {
             v.disk.valid(k.disk_id, 1) &&
             v.disk2.valid(k.disk2_id, 1) &&
             v.abs.valid(k.abs_id, 1) &&
-            v.disk.val() == v.disk2.val() &&
-            abs_inv(v.abs.val().mem, v.disk.val().mem) &&
-            abs_inv(v.abs.val().crash, v.disk.val().crash)
+            v.disk@ == v.disk2@ &&
+            abs_inv(v.abs@.mem, v.disk@.mem) &&
+            abs_inv(v.abs@.crash, v.disk@.crash)
         }
     }
 
     pub struct InvPermResult
     {
-        pub disk2_frac: FractionalResource<MemCrashView, 2>,
-        pub app_frac: FractionalResource<AbsPair, 2>,
+        pub disk2_frac: Frac<MemCrashView>,
+        pub app_frac: Frac<AbsPair>,
     }
 
     pub struct InvWritePerm
     {
         pub a: u8,
         pub v: u8,
-        pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
-        pub tracked app_frac: FractionalResource<AbsPair, 2>,
+        pub tracked disk2_frac: Frac<MemCrashView>,
+        pub tracked app_frac: Frac<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -91,47 +91,47 @@ verus! {
             self.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
             if self.addr() == 0 {
-                self.val() <= self.disk2_frac.val().mem.1 &&
-                self.val() <= self.disk2_frac.val().crash.1
+                self.val() <= self.disk2_frac@.mem.1 &&
+                self.val() <= self.disk2_frac@.crash.1
             } else {
-                self.val() >= self.disk2_frac.val().mem.0 &&
-                self.val() >= self.disk2_frac.val().crash.0
+                self.val() >= self.disk2_frac@.mem.0 &&
+                self.val() >= self.disk2_frac@.crash.0
             }
         }
 
         open spec fn post(&self, r: InvPermResult) -> bool {
             r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
-            r.disk2_frac.val().mem == view_write(self.disk2_frac.val().mem, self.addr(), self.val()) &&
-            ( r.disk2_frac.val().crash == self.disk2_frac.val().crash ||
-              r.disk2_frac.val().crash == view_write(self.disk2_frac.val().crash, self.addr(), self.val()) ) &&
+            r.disk2_frac@.mem == view_write(self.disk2_frac@.mem, self.addr(), self.val()) &&
+            ( r.disk2_frac@.crash == self.disk2_frac@.crash ||
+              r.disk2_frac@.crash == view_write(self.disk2_frac@.crash, self.addr(), self.val()) ) &&
 
             r.app_frac.valid(self.inv.constant().abs_id, 1) &&
-            r.app_frac.val().mem == if self.addr() == 0 { self.val() } else { self.app_frac.val().mem } &&
-            ( r.app_frac.val().crash == self.app_frac.val().crash ||
-              ( self.addr() == 0 && r.app_frac.val().crash == self.val() ) )
+            r.app_frac@.mem == if self.addr() == 0 { self.val() } else { self.app_frac@.mem } &&
+            ( r.app_frac@.crash == self.app_frac@.crash ||
+              ( self.addr() == 0 && r.app_frac@.crash == self.val() ) )
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             let tracked mut ires;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
                 r.combine_mut(inner.disk);
                 r.update_mut(MemCrashView{
-                        mem: view_write(r.val().mem, mself.addr(), mself.val()),
-                        crash: if write_crash { view_write(r.val().crash, mself.addr(), mself.val()) } else { r.val().crash },
+                        mem: view_write(r@.mem, mself.addr(), mself.val()),
+                        crash: if write_crash { view_write(r@.crash, mself.addr(), mself.val()) } else { r@.crash },
                     });
                 inner.disk = r.split_mut(1);
 
                 mself.disk2_frac.combine_mut(inner.disk2);
-                mself.disk2_frac.update_mut(inner.disk.val());
+                mself.disk2_frac.update_mut(inner.disk@);
                 inner.disk2 = mself.disk2_frac.split_mut(1);
 
                 if mself.addr() == 0 {
                     mself.app_frac.combine_mut(inner.abs);
                     mself.app_frac.update_mut(AbsPair{
                         mem: mself.val(),
-                        crash: if write_crash { mself.val() } else { mself.app_frac.val().crash },
+                        crash: if write_crash { mself.val() } else { mself.app_frac@.crash },
                     });
                     inner.abs = mself.app_frac.split_mut(1)
                 };
@@ -148,8 +148,8 @@ verus! {
 
     pub struct InvBarrierPerm
     {
-        pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
-        pub tracked app_frac: FractionalResource<AbsPair, 2>,
+        pub tracked disk2_frac: Frac<MemCrashView>,
+        pub tracked app_frac: Frac<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -170,14 +170,14 @@ verus! {
             r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             r.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
-            r.disk2_frac.val() == self.disk2_frac.val() &&
-            r.disk2_frac.val().mem == r.disk2_frac.val().crash &&
+            r.disk2_frac@ == self.disk2_frac@ &&
+            r.disk2_frac@.mem == r.disk2_frac@.crash &&
 
-            r.app_frac.val() == self.app_frac.val() &&
-            r.app_frac.val().mem == r.app_frac.val().crash
+            r.app_frac@ == self.app_frac@ &&
+            r.app_frac@.mem == r.app_frac@.crash
         }
 
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
@@ -196,8 +196,8 @@ verus! {
     pub struct InvReadPerm
     {
         pub a: u8,
-        pub tracked disk2_frac: FractionalResource<MemCrashView, 2>,
-        pub tracked app_frac: FractionalResource<AbsPair, 2>,
+        pub tracked disk2_frac: Frac<MemCrashView>,
+        pub tracked app_frac: Frac<AbsPair>,
         pub inv: Arc<AtomicInvariant<DiskInvParam, DiskInvState, DiskInvPred>>,
         pub tracked credit: OpenInvariantCredit,
     }
@@ -220,13 +220,13 @@ verus! {
             r.disk2_frac.valid(self.inv.constant().disk2_id, 1) &&
             r.app_frac.valid(self.inv.constant().abs_id, 1) &&
 
-            r.disk2_frac.val() == self.disk2_frac.val() &&
-            r.app_frac.val() == self.app_frac.val() &&
+            r.disk2_frac@ == self.disk2_frac@ &&
+            r.app_frac@ == self.app_frac@ &&
 
-            v == view_read(r.disk2_frac.val().mem, self.addr())
+            v == view_read(r.disk2_frac@.mem, self.addr())
         }
 
-        proof fn validate(tracked &self, tracked r: &FractionalResource<MemCrashView, 2>, tracked credit: OpenInvariantCredit)
+        proof fn validate(tracked &self, tracked r: &Frac<MemCrashView>, tracked credit: OpenInvariantCredit)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(credit => &mself.inv => inner => {
@@ -234,7 +234,7 @@ verus! {
             });
         }
 
-        proof fn apply(tracked self, tracked r: &FractionalResource<MemCrashView, 2>, v: u8) -> (tracked result: InvPermResult)
+        proof fn apply(tracked self, tracked r: &Frac<MemCrashView>, v: u8) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
@@ -254,10 +254,10 @@ verus! {
     {
         let (mut d, Tracked(r)) = Disk::new();
 
-        let tracked app_r = FractionalResource::<AbsPair, 2>::new(AbsPair{ mem: 0, crash: 0 });
+        let tracked app_r = Frac::<AbsPair>::new(AbsPair{ mem: 0, crash: 0 });
         let tracked (app_r, app_r1) = app_r.split(1);
 
-        let tracked disk_r = FractionalResource::<MemCrashView, 2>::new(r.val());
+        let tracked disk_r = Frac::<MemCrashView>::new(r@);
         let tracked (disk_r, disk_r1) = disk_r.split(1);
 
         let ghost inv_param = DiskInvParam{

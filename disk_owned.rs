@@ -7,7 +7,7 @@ use disk::DiskView;
 use disk::MemCrashView;
 use disk::view_write;
 use disk::frac;
-use frac::FractionalResource;
+use frac::Frac;
 use disk::Disk;
 use disk::DiskWritePermission;
 
@@ -23,14 +23,14 @@ verus! {
     {
         pub a: u8,
         pub v: u8,
-        pub tracked frac: FractionalResource<MemCrashView, 2>,
+        pub tracked frac: Frac<MemCrashView>,
         pub ghost abs_pre: AbsView,
         pub ghost abs_post: AbsView,
     }
 
     impl DiskWritePermission for WriteFupd
     {
-        type Result = FractionalResource<MemCrashView, 2>;
+        type Result = Frac<MemCrashView>;
 
         open spec fn namespace(&self) -> int { 0 }
         open spec fn id(&self) -> int { self.frac.id() }
@@ -42,32 +42,32 @@ verus! {
             self.frac.frac() == 1 &&
             if self.addr() == 0 {
                 self.abs_post == self.val() &&
-                self.val() <= self.frac.val().mem.1 &&
-                self.val() <= self.frac.val().crash.1
+                self.val() <= self.frac@.mem.1 &&
+                self.val() <= self.frac@.crash.1
             } else {
                 self.abs_post == self.abs_pre &&
                 self.val() >= self.abs_pre
             } &&
-            abs_inv(self.abs_pre, self.frac.val().mem) &&
-            abs_inv(self.abs_pre, self.frac.val().crash)
+            abs_inv(self.abs_pre, self.frac@.mem) &&
+            abs_inv(self.abs_pre, self.frac@.crash)
         }
 
-        open spec fn post(&self, r: FractionalResource<MemCrashView, 2>) -> bool {
+        open spec fn post(&self, r: Frac<MemCrashView>) -> bool {
             r.valid(self.id(), 1) &&
-            r.val().mem == view_write(self.frac.val().mem, self.addr(), self.val()) &&
-            ( r.val().crash == self.frac.val().crash ||
-              r.val().crash == view_write(self.frac.val().crash, self.addr(), self.val()) ) &&
-            abs_inv(self.abs_post, r.val().mem) &&
-            ( abs_inv(self.abs_pre, r.val().crash) ||
-              abs_inv(self.abs_post, r.val().crash) )
+            r@.mem == view_write(self.frac@.mem, self.addr(), self.val()) &&
+            ( r@.crash == self.frac@.crash ||
+              r@.crash == view_write(self.frac@.crash, self.addr(), self.val()) ) &&
+            abs_inv(self.abs_post, r@.mem) &&
+            ( abs_inv(self.abs_pre, r@.crash) ||
+              abs_inv(self.abs_post, r@.crash) )
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine_mut(self.frac);
             r.update_mut(MemCrashView{
-                    mem: view_write(r.val().mem, self.addr(), self.val()),
-                    crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
+                    mem: view_write(r@.mem, self.addr(), self.val()),
+                    crash: if write_crash { view_write(r@.crash, self.addr(), self.val()) } else { r@.crash },
                 });
             r.split_mut(1)
         }
@@ -76,13 +76,13 @@ verus! {
     pub struct WriteFupd1
     {
         pub v: u8,
-        pub tracked frac: FractionalResource<MemCrashView, 2>,
+        pub tracked frac: Frac<MemCrashView>,
         pub ghost abs: AbsView,
     }
 
     impl DiskWritePermission for WriteFupd1
     {
-        type Result = FractionalResource<MemCrashView, 2>;
+        type Result = Frac<MemCrashView>;
 
         open spec fn namespace(&self) -> int { 0 }
         open spec fn id(&self) -> int { self.frac.id() }
@@ -93,25 +93,25 @@ verus! {
             self.frac.inv() &&
             self.frac.frac() == 1 &&
             self.val() >= self.abs &&
-            abs_inv(self.abs, self.frac.val().mem) &&
-            abs_inv(self.abs, self.frac.val().crash)
+            abs_inv(self.abs, self.frac@.mem) &&
+            abs_inv(self.abs, self.frac@.crash)
         }
 
-        open spec fn post(&self, r: FractionalResource<MemCrashView, 2>) -> bool {
+        open spec fn post(&self, r: Frac<MemCrashView>) -> bool {
             r.valid(self.id(), 1) &&
-            r.val().mem == view_write(self.frac.val().mem, self.addr(), self.val()) &&
-            ( r.val().crash == self.frac.val().crash ||
-              r.val().crash == view_write(self.frac.val().crash, 1, self.val()) ) &&
-            abs_inv(self.abs, r.val().mem) &&
-            abs_inv(self.abs, r.val().crash)
+            r@.mem == view_write(self.frac@.mem, self.addr(), self.val()) &&
+            ( r@.crash == self.frac@.crash ||
+              r@.crash == view_write(self.frac@.crash, 1, self.val()) ) &&
+            abs_inv(self.abs, r@.mem) &&
+            abs_inv(self.abs, r@.crash)
         }
 
-        proof fn apply(tracked self, tracked r: &mut FractionalResource<MemCrashView, 2>, write_crash: bool) -> (tracked result: FractionalResource<MemCrashView, 2>)
+        proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine_mut(self.frac);
             r.update_mut(MemCrashView{
-                    mem: view_write(r.val().mem, self.addr(), self.val()),
-                    crash: if write_crash { view_write(r.val().crash, self.addr(), self.val()) } else { r.val().crash },
+                    mem: view_write(r@.mem, self.addr(), self.val()),
+                    crash: if write_crash { view_write(r@.crash, self.addr(), self.val()) } else { r@.crash },
                 });
             r.split_mut(1)
         }
