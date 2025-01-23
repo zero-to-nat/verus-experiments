@@ -7,15 +7,18 @@ use vstd::prelude::*;
 verus! {
     fn main() {
         let d = Disk::new(1024);
-        let (mut dw, Tracked(mut f0)) = DiskWrap::new(d);
+        let (mut dw, Tracked(mut f0), Tracked(mut pf0)) = DiskWrap::new(d);
 
         let tracked mut f4 = f0.split(4);
         let tracked mut f8 = f4.split(4);
 
+        let tracked mut pf4 = pf0.split(4);
+        let tracked mut pf8 = pf4.split(4);
+
         assert(f0@ == seq![0u8, 0u8, 0u8, 0u8]);
 
-        dw.write(0, &[120, 121, 122, 123], Tracked(&mut f0));
-        dw.write(4, &[124, 125, 126, 127], Tracked(&mut f4));
+        dw.write(0, &[120, 121, 122, 123], Tracked(&mut f0), Tracked(&mut pf0));
+        dw.write(4, &[124, 125, 126, 127], Tracked(&mut f4), Tracked(&mut pf4));
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);
 
