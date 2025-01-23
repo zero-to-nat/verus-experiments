@@ -116,24 +116,24 @@ verus! {
             let tracked mut mself = self;
             let tracked mut ires;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
-                r.combine_mut(inner.disk);
-                r.update_mut(MemCrashView{
+                r.combine(inner.disk);
+                r.update(MemCrashView{
                         mem: view_write(r@.mem, mself.addr(), mself.val()),
                         crash: if write_crash { view_write(r@.crash, mself.addr(), mself.val()) } else { r@.crash },
                     });
-                inner.disk = r.split_mut(1);
+                inner.disk = r.split(1);
 
-                mself.disk2_frac.combine_mut(inner.disk2);
-                mself.disk2_frac.update_mut(inner.disk@);
-                inner.disk2 = mself.disk2_frac.split_mut(1);
+                mself.disk2_frac.combine(inner.disk2);
+                mself.disk2_frac.update(inner.disk@);
+                inner.disk2 = mself.disk2_frac.split(1);
 
                 if mself.addr() == 0 {
-                    mself.app_frac.combine_mut(inner.abs);
-                    mself.app_frac.update_mut(AbsPair{
+                    mself.app_frac.combine(inner.abs);
+                    mself.app_frac.update(AbsPair{
                         mem: mself.val(),
                         crash: if write_crash { mself.val() } else { mself.app_frac@.crash },
                     });
-                    inner.abs = mself.app_frac.split_mut(1)
+                    inner.abs = mself.app_frac.split(1)
                 };
 
                 ires = InvPermResult{
@@ -254,11 +254,11 @@ verus! {
     {
         let (mut d, Tracked(r)) = Disk::new();
 
-        let tracked app_r = Frac::<AbsPair>::new(AbsPair{ mem: 0, crash: 0 });
-        let tracked (app_r, app_r1) = app_r.split(1);
+        let tracked mut app_r = Frac::<AbsPair>::new(AbsPair{ mem: 0, crash: 0 });
+        let tracked app_r1 = app_r.split(1);
 
-        let tracked disk_r = Frac::<MemCrashView>::new(r@);
-        let tracked (disk_r, disk_r1) = disk_r.split(1);
+        let tracked mut disk_r = Frac::<MemCrashView>::new(r@);
+        let tracked disk_r1 = disk_r.split(1);
 
         let ghost inv_param = DiskInvParam{
             disk_id: r.id(),

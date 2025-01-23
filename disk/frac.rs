@@ -143,7 +143,7 @@ verus! {
             r
         }
 
-        pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: Self)
+        pub proof fn split(tracked &mut self, n: int) -> (tracked result: Self)
             requires
                 old(self).inv(),
                 0 < n < old(self).frac()
@@ -166,25 +166,7 @@ verus! {
             Self { r: r2 }
         }
 
-        pub proof fn split(tracked self, n: int) -> (tracked result: (Self, Self))
-            requires
-                self.inv(),
-                0 < n < self.frac()
-            ensures
-                result.0.id() == result.1.id() == self.id(),
-                result.0.inv(),
-                result.1.inv(),
-                result.0@ == self@,
-                result.1@ == self@,
-                result.0.frac() + result.1.frac() == self.frac(),
-                result.1.frac() == n,
-        {
-            let tracked mut s = self;
-            let tracked r = s.split_mut(n);
-            (s, r)
-        }
-
-        pub proof fn combine_mut(tracked &mut self, tracked other: Self)
+        pub proof fn combine(tracked &mut self, tracked other: Self)
             requires
                 old(self).inv(),
                 other.inv(),
@@ -202,24 +184,7 @@ verus! {
             self.r = r.join(other.r);
         }
 
-        pub proof fn combine(tracked self, tracked other: Self) -> (tracked result: Self)
-            requires
-                self.inv(),
-                other.inv(),
-                self.id() == other.id(),
-            ensures
-                result.id() == self.id(),
-                result.inv(),
-                result@ == self@,
-                result@ == other@,
-                result.frac() == self.frac() + other.frac(),
-        {
-            let tracked mut s = self;
-            s.combine_mut(other);
-            s
-        }
-
-        pub proof fn update_mut(tracked &mut self, v: T)
+        pub proof fn update(tracked &mut self, v: T)
             requires
                 old(self).inv(),
                 old(self).frac() == Total,
@@ -234,47 +199,34 @@ verus! {
             let f = FractionalCarrier::<T, Total>::Value { v: v, n: Total as int };
             self.r = r.update(f);
         }
-
-        pub proof fn update(tracked self, v: T) -> (tracked result: Self)
-            requires
-                self.inv(),
-                self.frac() == Total,
-            ensures
-                result.id() == self.id(),
-                result.inv(),
-                result@ == v,
-                result.frac() == self.frac(),
-        {
-            let tracked mut s = self;
-            s.update_mut(v);
-            s
-        }
     }
 
     fn main()
     {
-        let tracked r = Frac::<u64, 3>::new(123);
+        let tracked mut r = Frac::<u64, 3>::new(123);
         assert(r@ == 123);
         assert(r.frac() == 3);
-        let tracked (r1, r2) = r.split(2);
-        assert(r1@ == 123);
+        let tracked r2 = r.split(2);
+        assert(r@ == 123);
         assert(r2@ == 123);
-        assert(r1.frac() == 1);
+        assert(r.frac() == 1);
         assert(r2.frac() == 2);
-        let tracked r3 = r1.combine(r2);
-        let tracked r4 = r3.update(456);
-        assert(r4@ == 456);
-        assert(r4.frac() == 3);
+        proof {
+            r.combine(r2);
+            r.update(456);
+        }
+        assert(r@ == 456);
+        assert(r.frac() == 3);
 
         let tracked mut a = Frac::<u32>::new(5);
         assert(a@ == 5);
         assert(a.frac() == 2);
-        let tracked b = a.split_mut(1);
+        let tracked b = a.split(1);
         assert(a.frac() == 1);
         assert(b.frac() == 1);
         proof {
-            a.combine_mut(b);
-            a.update_mut(6);
+            a.combine(b);
+            a.update(6);
         }
         assert(a@ == 6);
     }

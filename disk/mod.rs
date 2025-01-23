@@ -163,16 +163,16 @@ verus! {
                     crash: (0, 0),
                 }),
         {
-            let tracked r = Frac::<MemCrashView>::new(MemCrashView{
+            let tracked mut r = Frac::<MemCrashView>::new(MemCrashView{
                 mem: (0, 0),
                 crash: (0, 0),
             });
-            let tracked (r1, r2) = r.split(1);
+            let tracked r2 = r.split(1);
             let mut d = Disk{
                 block0: vec![0],
                 block1: vec![0],
                 durable: (0, 0),
-                frac: Tracked(r1),
+                frac: Tracked(r),
                 proph0: Prophecy::<u8>::new(),
                 proph1: Prophecy::<u8>::new(),
             };

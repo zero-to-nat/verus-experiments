@@ -64,12 +64,12 @@ verus! {
 
         proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Frac<MemCrashView>)
         {
-            r.combine_mut(self.frac);
-            r.update_mut(MemCrashView{
+            r.combine(self.frac);
+            r.update(MemCrashView{
                     mem: view_write(r@.mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r@.crash, self.addr(), self.val()) } else { r@.crash },
                 });
-            r.split_mut(1)
+            r.split(1)
         }
     }
 
@@ -108,12 +108,12 @@ verus! {
 
         proof fn apply(tracked self, tracked r: &mut Frac<MemCrashView>, write_crash: bool) -> (tracked result: Frac<MemCrashView>)
         {
-            r.combine_mut(self.frac);
-            r.update_mut(MemCrashView{
+            r.combine(self.frac);
+            r.update(MemCrashView{
                     mem: view_write(r@.mem, self.addr(), self.val()),
                     crash: if write_crash { view_write(r@.crash, self.addr(), self.val()) } else { r@.crash },
                 });
-            r.split_mut(1)
+            r.split(1)
         }
     }
 
