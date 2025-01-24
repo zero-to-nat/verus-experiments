@@ -1,5 +1,5 @@
 use vstd::prelude::*;
-use super::disk::*;
+use super::vecdisk::*;
 use super::seq_view::*;
 
 verus! {

@@ -1,5 +1,14 @@
+// Logical atomicity experiments, mechanizing write-restricted storage.
 pub mod frac;
 pub mod logatom;
 pub mod pairdisk;
+
+// Hamming-based CRC specs and proofs.
 pub mod hamming;
 pub mod crc;
+
+// Per-address separation logic for a disk.
+pub mod map_view;
+pub mod seq_view;
+pub mod vecdisk;
+pub mod disk_wrap;

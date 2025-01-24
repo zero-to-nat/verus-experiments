@@ -1,7 +1,7 @@
-mod disksep;
+mod disk;
 
-use disksep::disk::*;
-use disksep::disk_wrap::*;
+use disk::vecdisk::*;
+use disk::disk_wrap::*;
 use vstd::prelude::*;
 
 verus! {
