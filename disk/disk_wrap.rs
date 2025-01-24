@@ -1,12 +1,37 @@
 use vstd::prelude::*;
 use super::vecdisk::*;
 use super::seq_view::*;
+use super::logatom::*;
 
 verus! {
     pub struct DiskWrap {
         d: Disk,
         a: Tracked<SeqAuth<u8>>,
         pa: Tracked<SeqAuth<u8>>,
+    }
+
+    pub struct WriteOp {
+        pub persist_id: int,
+        pub addr: usize,
+        pub data: Seq<u8>,
+    }
+
+    impl MutOperation for WriteOp {
+        type Resource = SeqAuth<u8>;
+        type ExecResult = ();
+        type ApplyHint = Seq<u8>;
+
+        open spec fn requires(self, pstate: Seq<u8>, r: Self::Resource, e: ()) -> bool {
+            &&& r.inv()
+            &&& r.id() == self.persist_id
+            &&& can_result_from_write(pstate, r@, self.addr as int, self.data)
+        }
+
+        open spec fn ensures(self, pstate: Seq<u8>, pre: Self::Resource, post: Self::Resource) -> bool {
+            &&& post.inv()
+            &&& post.id() == self.persist_id
+            &&& post@ == pstate
+        }
     }
 
     impl DiskWrap {
@@ -44,17 +69,17 @@ verus! {
             self.d.read(a, len)
         }
 
-        pub fn write(&mut self, a: usize, v: &[u8],
-                     Tracked(perm): Tracked<&mut SeqFrac<u8>>,
-                     Tracked(pperm): Tracked<&mut SeqFrac<u8>>)
+        pub fn write<Op>(&mut self, a: usize, v: &[u8],
+                         Tracked(perm): Tracked<&mut SeqFrac<u8>>,
+                         Tracked(p_op): Tracked<Op>) -> (result: Tracked<Op::ApplyResult>)
+            where
+                Op: MutLinearizer<WriteOp>,
             requires
                 old(self).inv(),
                 old(perm).valid(old(self).id()),
                 old(perm).off() == a,
                 old(perm)@.len() == v@.len(),
-                old(pperm).valid(old(self).persist_id()),
-                old(pperm).off() == a,
-                old(pperm)@.len() == v@.len(),
+                p_op.pre(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
@@ -62,19 +87,16 @@ verus! {
                 perm.valid(self.id()),
                 perm.off() == old(perm).off(),
                 perm@ =~= v@,
-                pperm.valid(self.persist_id()),
-                pperm.off() == old(pperm).off(),
-                can_result_from_write(pperm@, old(pperm)@, 0, v@),
+                p_op.post(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }, (), result@),
         {
             proof {
                 perm.agree(self.a.borrow());
-                pperm.agree(self.pa.borrow());
             }
             self.d.write(a, v);
-            proof {
+            Tracked({
                 perm.update(self.a.borrow_mut(), v@);
-                pperm.update(self.pa.borrow_mut(), self.d.persist().subrange(a as int, a+v.len()));
-            }
+                p_op.apply(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }, self.d.persist(), self.pa.borrow_mut(), &())
+            })
         }
 
         pub fn new(d: Disk) -> (result: (DiskWrap, Tracked<SeqFrac<u8>>, Tracked<SeqFrac<u8>>))
