@@ -3,14 +3,14 @@ use vstd::prelude::*;
 verus! {
     pub trait ReadOperation : Sized {
         type Resource /* = () */;   // tracked resource(s) passed to callback
-        type ExecResult /* = () */;
+        type ExecResult /* = () */; // executable result returned from operation
 
         spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool;
     }
 
     pub trait MutOperation : Sized {
         type Resource /* = () */;   // tracked resource(s) passed to callback
-        type ExecResult /* = () */;
+        type ExecResult /* = () */; // executable result returned from operation
         type ApplyHint /* = () */;  // when apply might otherwise be non-deterministic
 
         spec fn requires(self, hint: Self::ApplyHint, r: Self::Resource, e: Self::ExecResult) -> bool;
