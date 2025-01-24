@@ -10,49 +10,49 @@ use vstd::modes::*;
 
 verus! {
     // Too bad that `nat` and `int` are forbidden as the type of a const generic parameter
-    pub enum Fractional<T, const Total: u64> {
+    enum FractionalCarrier<T, const Total: u64> {
         Value { v: T, n: int },
         Empty,
         Invalid,
     }
 
-    impl<T, const Total: u64> Fractional<T, Total> {
-        pub open spec fn new(v: T) -> Self {
-            Fractional::Value { v: v, n: Total as int }
+    impl<T, const Total: u64> FractionalCarrier<T, Total> {
+        spec fn new(v: T) -> Self {
+            FractionalCarrier::Value { v: v, n: Total as int }
         }
     }
 
-    impl<T, const Total: u64> PCM for Fractional<T, Total> {
-        open spec fn valid(self) -> bool {
+    impl<T, const Total: u64> PCM for FractionalCarrier<T, Total> {
+        closed spec fn valid(self) -> bool {
             match self {
-                Fractional::Invalid => false,
-                Fractional::Empty => true,
-                Fractional::Value { v: v, n: n } => 0 < n <= Total,
+                FractionalCarrier::Invalid => false,
+                FractionalCarrier::Empty => true,
+                FractionalCarrier::Value { v: v, n: n } => 0 < n <= Total,
             }
         }
 
-        open spec fn op(self, other: Self) -> Self {
+        closed spec fn op(self, other: Self) -> Self {
             match self {
-                Fractional::Invalid => Fractional::Invalid,
-                Fractional::Empty => other,
-                Fractional::Value { v: sv, n: sn } => match other {
-                    Fractional::Invalid => Fractional::Invalid,
-                    Fractional::Empty => self,
-                    Fractional::Value { v: ov, n: on } => {
+                FractionalCarrier::Invalid => FractionalCarrier::Invalid,
+                FractionalCarrier::Empty => other,
+                FractionalCarrier::Value { v: sv, n: sn } => match other {
+                    FractionalCarrier::Invalid => FractionalCarrier::Invalid,
+                    FractionalCarrier::Empty => self,
+                    FractionalCarrier::Value { v: ov, n: on } => {
                         if sv != ov {
-                            Fractional::Invalid
+                            FractionalCarrier::Invalid
                         } else if sn <= 0 || on <= 0 {
-                            Fractional::Invalid
+                            FractionalCarrier::Invalid
                         } else {
-                            Fractional::Value { v: sv, n: sn+on }
+                            FractionalCarrier::Value { v: sv, n: sn+on }
                         }
                     },
                 },
             }
         }
 
-        open spec fn unit() -> Self {
-            Fractional::Empty
+        closed spec fn unit() -> Self {
+            FractionalCarrier::Empty
         }
 
         proof fn closed_under_incl(a: Self, b: Self) {
@@ -71,11 +71,11 @@ verus! {
         }
     }
 
-    pub struct FractionalResource<T, const Total: u64> {
-        r: Resource<Fractional<T, Total>>,
+    pub struct Frac<T, const Total: u64 = 2> {
+        r: Resource<FractionalCarrier<T, Total>>,
     }
 
-    impl<T, const Total: u64> FractionalResource<T, Total> {
+    impl<T, const Total: u64> Frac<T, Total> {
         pub closed spec fn inv(self) -> bool
         {
             self.r.value() is Value
@@ -86,7 +86,7 @@ verus! {
             self.r.loc()
         }
 
-        pub closed spec fn val(self) -> T
+        pub closed spec fn view(self) -> T
         {
             self.r.value()->v
         }
@@ -101,38 +101,49 @@ verus! {
             self.inv() && self.id() == id && self.frac() == frac
         }
 
-        pub proof fn default() -> (tracked result: FractionalResource<T, Total>)
+        pub proof fn dummy() -> (tracked result: Self)
         {
-            let tracked r = Resource::alloc(Fractional::unit());
-            FractionalResource{ r }
+            let tracked r = Resource::alloc(FractionalCarrier::unit());
+            Frac{ r }
         }
 
-        pub proof fn alloc(v: T) -> (tracked result: FractionalResource<T, Total>)
+        pub proof fn new(v: T) -> (tracked result: Self)
             requires
                 Total > 0,
             ensures
                 result.inv(),
-                result.val() == v,
                 result.frac() == Total as int,
+                result@ == v,
         {
-            let f = Fractional::<T, Total>::new(v);
+            let f = FractionalCarrier::<T, Total>::new(v);
             let tracked r = Resource::alloc(f);
-            FractionalResource { r }
+            Frac { r }
         }
 
-        pub proof fn agree(tracked self: &FractionalResource<T, Total>, tracked other: &FractionalResource<T, Total>)
+        pub proof fn agree(tracked self: &Self, tracked other: &Self)
             requires
                 self.inv(),
                 other.inv(),
                 self.id() == other.id(),
             ensures
-                self.val() == other.val(),
+                self@ == other@,
         {
             let tracked joined = self.r.join_shared(&other.r);
             joined.validate()
         }
 
-        pub proof fn split_mut(tracked &mut self, n: int) -> (tracked result: FractionalResource<T, Total>)
+        pub proof fn take(tracked &mut self) -> (tracked result: Self)
+            requires
+                old(self).inv(),
+            ensures
+                result == *old(self),
+        {
+            let tracked mut r = Self::dummy();
+            tracked_swap(self, &mut r);
+            r
+        }
+
+        pub proof fn split(tracked &mut self, n: int) -> (tracked result: Self)
             requires
                 old(self).inv(),
                 0 < n < old(self).frac()
@@ -140,121 +151,83 @@ verus! {
                 result.id() == self.id() == old(self).id(),
                 self.inv(),
                 result.inv(),
-                self.val() == old(self).val(),
-                result.val() == old(self).val(),
+                self@ == old(self)@,
+                result@ == old(self)@,
                 self.frac() + result.frac() == old(self).frac(),
                 result.frac() == n,
         {
-            let tracked mut r = Resource::alloc(Fractional::unit());
+            let tracked mut r = Resource::alloc(FractionalCarrier::unit());
             tracked_swap(&mut self.r, &mut r);
-            let tracked (r1, r2) = r.split(Fractional::Value { v: r.value()->v,
-                                                               n: r.value()->n - n },
-                                           Fractional::Value { v: r.value()->v,
-                                                               n: n });
+            let tracked (r1, r2) = r.split(FractionalCarrier::Value { v: r.value()->v,
+                                                                      n: r.value()->n - n },
+                                           FractionalCarrier::Value { v: r.value()->v,
+                                                                      n: n });
             self.r = r1;
-            FractionalResource { r: r2 }
+            Self { r: r2 }
         }
 
-        pub proof fn split(tracked self, n: int) ->
-            (tracked result: (FractionalResource<T, Total>, FractionalResource<T, Total>))
-            requires
-                self.inv(),
-                0 < n < self.frac()
-            ensures
-                result.0.id() == result.1.id() == self.id(),
-                result.0.inv(),
-                result.1.inv(),
-                result.0.val() == self.val(),
-                result.1.val() == self.val(),
-                result.0.frac() + result.1.frac() == self.frac(),
-                result.1.frac() == n,
-        {
-            let tracked mut s = self;
-            let tracked r = s.split_mut(n);
-            (s, r)
-        }
-
-        pub proof fn combine_mut(tracked &mut self, tracked other: FractionalResource<T, Total>)
+        pub proof fn combine(tracked &mut self, tracked other: Self)
             requires
                 old(self).inv(),
                 other.inv(),
                 old(self).id() == other.id(),
             ensures
-                self.id() == old(self).id(),
                 self.inv(),
-                self.val() == old(self).val(),
-                self.val() == other.val(),
+                self.id() == old(self).id(),
+                self@ == old(self)@,
+                self@ == other@,
                 self.frac() == old(self).frac() + other.frac(),
         {
-            let tracked mut r = Resource::alloc(Fractional::unit());
+            let tracked mut r = Resource::alloc(FractionalCarrier::unit());
             tracked_swap(&mut self.r, &mut r);
             r.validate_2(&other.r);
             self.r = r.join(other.r);
         }
 
-        pub proof fn combine(tracked self, tracked other: FractionalResource<T, Total>) -> (tracked result: FractionalResource<T, Total>)
-            requires
-                self.inv(),
-                other.inv(),
-                self.id() == other.id(),
-            ensures
-                result.id() == self.id(),
-                result.inv(),
-                result.val() == self.val(),
-                result.val() == other.val(),
-                result.frac() == self.frac() + other.frac(),
-        {
-            let tracked mut s = self;
-            s.combine_mut(other);
-            s
-        }
-
-        pub proof fn update_mut(tracked &mut self, v: T)
+        pub proof fn update(tracked &mut self, v: T)
             requires
                 old(self).inv(),
                 old(self).frac() == Total,
             ensures
                 self.id() == old(self).id(),
                 self.inv(),
-                self.val() == v,
+                self@ == v,
                 self.frac() == old(self).frac(),
         {
-            let tracked mut r = Resource::alloc(Fractional::unit());
+            let tracked mut r = Resource::alloc(FractionalCarrier::unit());
             tracked_swap(&mut self.r, &mut r);
-            let f = Fractional::<T, Total>::Value { v: v, n: Total as int };
+            let f = FractionalCarrier::<T, Total>::Value { v: v, n: Total as int };
             self.r = r.update(f);
-        }
-
-        pub proof fn update(tracked self, v: T) -> (tracked result: FractionalResource<T, Total>)
-            requires
-                self.inv(),
-                self.frac() == Total,
-            ensures
-                result.id() == self.id(),
-                result.inv(),
-                result.val() == v,
-                result.frac() == self.frac(),
-        {
-            let tracked mut s = self;
-            s.update_mut(v);
-            s
         }
     }
 
     fn main()
     {
-        let tracked r = FractionalResource::<u64, 3>::alloc(123);
-        assert(r.val() == 123);
+        let tracked mut r = Frac::<u64, 3>::new(123);
+        assert(r@ == 123);
         assert(r.frac() == 3);
-        let tracked (r1, r2) = r.split(2);
-        assert(r1.val() == 123);
-        assert(r2.val() == 123);
-        assert(r1.frac() == 1);
+        let tracked r2 = r.split(2);
+        assert(r@ == 123);
+        assert(r2@ == 123);
+        assert(r.frac() == 1);
         assert(r2.frac() == 2);
-        let tracked r3 = r1.combine(r2);
-        let tracked r4 = r3.update(456);
-        assert(r4.val() == 456);
-        assert(r4.frac() == 3);
-        ()
+        proof {
+            r.combine(r2);
+            r.update(456);
+        }
+        assert(r@ == 456);
+        assert(r.frac() == 3);
+
+        let tracked mut a = Frac::<u32>::new(5);
+        assert(a@ == 5);
+        assert(a.frac() == 2);
+        let tracked b = a.split(1);
+        assert(a.frac() == 1);
+        assert(b.frac() == 1);
+        proof {
+            a.combine(b);
+            a.update(6);
+        }
+        assert(a@ == 6);
     }
 }

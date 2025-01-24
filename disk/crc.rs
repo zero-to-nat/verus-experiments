@@ -1,9 +1,6 @@
 use vstd::prelude::*;
 use vstd::bytes::*;
-
-mod hamming;
-
-use hamming::*;
+use super::hamming::*;
 
 verus! {
     pub open spec fn spec_crc64_bytes(bytes: Seq<u8>) -> Seq<u8> {

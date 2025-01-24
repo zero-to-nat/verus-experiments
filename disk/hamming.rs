@@ -104,7 +104,7 @@ verus! {
         ensures
             sum(s1) == sum(s2)
     {
-        fold_right_permutation(s1, s2, |i, s: nat| { s+i as nat }, 0)
+        lemma_fold_right_permutation(s1, s2, |i, s: nat| { s+i as nat }, 0)
     }
 
     pub proof fn sum_concat(s1: Seq<nat>, s2: Seq<nat>)
