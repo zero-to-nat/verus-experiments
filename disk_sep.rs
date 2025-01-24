@@ -22,10 +22,8 @@ verus! {
 
         proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) -> (tracked out: SeqFrac<u8>) {
             let tracked mut mself = self;
-            assert(mself.frac@.len() == op.data.len());
-            assert(op.data.len() == pstate.subrange(op.addr as int, op.addr + op.data.len()).len());
-            // XXX..  maybe pstate should be just the subrange?
-            mself.frac.update(r, pstate.subrange(op.addr as int, op.addr + op.data.len()));
+            mself.frac.agree(r);
+            mself.frac.update(r, pstate);
             mself.frac
         }
     }
