@@ -56,12 +56,12 @@ verus! {
                   abs_inv(self.abs_post, r@.crash) )
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, write_crash: bool, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{
                     mem: view_write(r@.mem, op.addr, op.val),
-                    crash: if op.write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
+                    crash: if write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                 });
             r.split(1)
         }
@@ -96,12 +96,12 @@ verus! {
             &&& abs_inv(self.abs, r@.crash)
         }
 
-        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, write_crash: bool, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{
                     mem: view_write(r@.mem, op.addr, op.val),
-                    crash: if op.write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
+                    crash: if write_crash { view_write(r@.crash, op.addr, op.val) } else { r@.crash },
                 });
             r.split(1)
         }

@@ -36,22 +36,22 @@ verus! {
         pub id: int,
         pub addr: u8,
         pub val: u8,
-        pub write_crash: bool,
     }
 
     impl logatom::MutOperation for DiskWriteOp {
         type Resource = Frac<MemCrashView>;
         type ExecResult = ();
+        type ApplyHint = bool;
 
-        open spec fn requires(self, r: Self::Resource, e: ()) -> bool {
+        open spec fn requires(self, write_crash: bool, r: Self::Resource, e: ()) -> bool {
             r.valid(self.id, 1)
         }
 
-        open spec fn ensures(self, pre: Self::Resource, post: Self::Resource) -> bool {
+        open spec fn ensures(self, write_crash: bool, pre: Self::Resource, post: Self::Resource) -> bool {
             &&& post.valid(self.id, 1)
             &&& post@ == MemCrashView{
                 mem: view_write(pre@.mem, self.addr, self.val),
-                crash: if self.write_crash { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash },
+                crash: if write_crash { view_write(pre@.crash, self.addr, self.val) } else { pre@.crash },
             }
         }
     }
@@ -201,11 +201,11 @@ verus! {
                 Perm: logatom::MutLinearizer<DiskWriteOp>
             requires
                 old(self).inv(),
-                forall|wc| #[trigger] perm.pre(DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: wc}),
+                perm.pre(DiskWriteOp{ id: old(self).id(), addr: addr, val: val }),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
-                exists|wc| #[trigger] perm.post(DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: wc }, (), result@),
+                perm.post(DiskWriteOp{ id: old(self).id(), addr: addr, val: val }, (), result@),
         {
             if addr == 0 {
                 self.block0.push(val);
@@ -237,8 +237,8 @@ verus! {
                     assert(self.durable.1 == proph_value(self.block1, self.proph1));
                 }
 
-                let op = DiskWriteOp{ id: old(self).id(), addr: addr, val: val, write_crash: write_crash };
-                perm.apply(op, self.frac.borrow_mut(), &())
+                let op = DiskWriteOp{ id: old(self).id(), addr: addr, val: val };
+                perm.apply(op, write_crash, self.frac.borrow_mut(), &())
             })
         }
 
