@@ -3,13 +3,13 @@ use vstd::prelude::*;
 
 mod disk;
 
-use disk::DiskView;
-use disk::MemCrashView;
-use disk::view_write;
-use disk::frac;
-use frac::Frac;
-use disk::Disk;
+use disk::frac::Frac;
 use disk::logatom;
+use disk::pairdisk::DiskView;
+use disk::pairdisk::MemCrashView;
+use disk::pairdisk::view_write;
+use disk::pairdisk::Disk;
+use disk::pairdisk::DiskWriteOp;
 
 verus! {
     pub type AbsView = u8;
@@ -26,13 +26,13 @@ verus! {
         pub ghost abs_post: AbsView,
     }
 
-    impl logatom::MutLinearizer<disk::DiskWriteOp> for WriteFupd
+    impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd
     {
         type ApplyResult = Frac<MemCrashView>;
 
         open spec fn namespace(self) -> int { 0 }
 
-        open spec fn pre(self, op: disk::DiskWriteOp) -> bool {
+        open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)
             &&& if op.addr == 0 {
                     self.abs_post == op.val &&
@@ -46,7 +46,7 @@ verus! {
             &&& abs_inv(self.abs_pre, self.frac@.crash)
         }
 
-        open spec fn post(self, op: disk::DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
+        open spec fn post(self, op: DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
             &&& r.valid(op.id, 1)
             &&& r@.mem == view_write(self.frac@.mem, op.addr, op.val)
             &&& ( r@.crash == self.frac@.crash ||
@@ -56,7 +56,7 @@ verus! {
                   abs_inv(self.abs_post, r@.crash) )
         }
 
-        proof fn apply(tracked self, op: disk::DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{
@@ -73,13 +73,13 @@ verus! {
         pub ghost abs: AbsView,
     }
 
-    impl logatom::MutLinearizer<disk::DiskWriteOp> for WriteFupd1
+    impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd1
     {
         type ApplyResult = Frac<MemCrashView>;
 
         open spec fn namespace(self) -> int { 0 }
 
-        open spec fn pre(self, op: disk::DiskWriteOp) -> bool {
+        open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)
             &&& op.addr == 1
             &&& op.val >= self.abs
@@ -87,7 +87,7 @@ verus! {
             &&& abs_inv(self.abs, self.frac@.crash)
         }
 
-        open spec fn post(self, op: disk::DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
+        open spec fn post(self, op: DiskWriteOp, er: (), r: Frac<MemCrashView>) -> bool {
             &&& r.valid(op.id, 1)
             &&& r@.mem == view_write(self.frac@.mem, op.addr, op.val)
             &&& ( r@.crash == self.frac@.crash ||
@@ -96,7 +96,7 @@ verus! {
             &&& abs_inv(self.abs, r@.crash)
         }
 
-        proof fn apply(tracked self, op: disk::DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
+        proof fn apply(tracked self, op: DiskWriteOp, tracked r: &mut Frac<MemCrashView>, er: &()) -> (tracked result: Frac<MemCrashView>)
         {
             r.combine(self.frac);
             r.update(MemCrashView{
