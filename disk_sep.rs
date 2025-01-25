@@ -403,8 +403,17 @@ verus! {
     // persistent state.
     fn disk_recovery_axiom() -> (result: (DiskWrap, Tracked<SeqFrac<u8>>, Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>))
         ensures
+            result.0.inv(),
             result.1@.valid(result.0.id()),
+            result.1@.off() == 0,
+            result.1@@.len() == 5,
             result.2@.constant().persist_id == result.0.persist_id(),
+
+            // Various constants that maybe should be elsewhere to begin with..
+            result.2@.constant().ptr_addr == 0,
+            result.2@.constant().a_addr == 1,
+            result.2@.constant().b_addr == 3,
+            result.2@.constant().total == 10,
     {
         let d = Disk::new(5);
         let (dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
@@ -414,6 +423,13 @@ verus! {
 
     // Untrusted (verified) recovery helper: re-allocate ephemeral ghost state.
     fn disk_recovery_verified_helper(Tracked(i): Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>) -> (result: (Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>, Tracked<Frac<PtrState>>))
+        ensures
+            result.1@.valid(result.0@.constant().ptr_state_id, 1),
+            result.0@.constant().persist_id == i.constant().persist_id,
+            result.0@.constant().ptr_addr == i.constant().ptr_addr,
+            result.0@.constant().a_addr == i.constant().a_addr,
+            result.0@.constant().b_addr == i.constant().b_addr,
+            result.0@.constant().total == i.constant().total,
     {
         // Destroy the invariant; we will re-allocate a new one with a different ptr_state_id.
         let ghost mut iparam = i.constant();
@@ -436,8 +452,44 @@ verus! {
 
         // Re-allocate ptr_state_frac.
         let (Tracked(i), Tracked(mut ps)) = disk_recovery_verified_helper(Tracked(i));
+        let tracked i = Arc::new(i);
 
-        // XXX TBD
+        let tracked mut f1 = f.split(1);
+        let tracked mut f3 = f1.split(2);
+
+        // Superfluous flush: establish that ps@ is either A or B.
+        // Really, we should know that f@ == pf@ (persistent state).
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        assert(ps@ == PtrState::A || ps@ == PtrState::B);
+
+        let ptr = dw.read(0, 1, Tracked(&f));
+        if ptr[0] == 0 {
+            assert(ps@ == PtrState::A);
+        } else {
+            assert(ps@ == PtrState::B);
+
+            // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
+            // Then write valid data.
+            let credit = create_open_invariant_credit();
+            dw.write::<InactiveWriter>(1, &[0, 0], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+
+            let credit = create_open_invariant_credit();
+            dw.write::<InactiveWriter>(1, &[2, 8], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+
+            // Flush the new contents of area A before commit.
+            let credit = create_open_invariant_credit();
+            let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f1, inv: i.clone(), credit: credit.get() }));
+
+            // Write and commit the pointer, switching back to area A.
+            let credit = create_open_invariant_credit();
+            let Tracked(ps) = dw.write::<CommittingWriter>(0, &[0], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+            assert(ps@ == PtrState::Either);
+
+            let credit = create_open_invariant_credit();
+            let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+            assert(ps@ == PtrState::A);
+        }
     }
 
     // Lower-level test of writing to disk addresses with full ownership of crash resources.
