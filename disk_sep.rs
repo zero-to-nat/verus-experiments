@@ -300,7 +300,10 @@ verus! {
     }
 
     // Test of separation-logic interface with invariant ownership of crash (persist) resources.
+    //
     // test_inv_init() sets up the disk and allocates the invariant for the first time, like mkfs.
+    //
+    // test_inv_recover() recovers from a crash on a disk that already was initialized.
     fn test_inv_init() {
         let d = Disk::new(5);
         let (mut dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
@@ -373,7 +376,68 @@ verus! {
         let credit = create_open_invariant_credit();
         let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
         assert(ps@ == PtrState::A);
+    }
 
+    // CORE ASSUMPTION: the disk contains state that satisfied our invariant before crash.
+    #[verifier::external_body]
+    proof fn disk_recovery_axiom_helper(tracked pf: SeqFrac<u8>) -> (tracked result: AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>)
+        requires
+            // Not a complete set of preconditions for soundness; requires trusting caller too.
+            pf.inv(),
+            pf.off() == 0,
+            pf@.len() >= 5,
+        ensures
+            // Core postcondition: the invariant talks about contents of the recovered disk!
+            result.constant().persist_id == pf.id(),
+
+            // Various constants that maybe should be elsewhere to begin with..
+            result.constant().ptr_addr == 0,
+            result.constant().a_addr == 1,
+            result.constant().b_addr == 3,
+            result.constant().total == 10,
+    {
+        unimplemented!();
+    }
+
+    // CORE ASSUMPTION: we can get a disk object and an invariant that talks about that disk's
+    // persistent state.
+    fn disk_recovery_axiom() -> (result: (DiskWrap, Tracked<SeqFrac<u8>>, Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>))
+        ensures
+            result.1@.valid(result.0.id()),
+            result.2@.constant().persist_id == result.0.persist_id(),
+    {
+        let d = Disk::new(5);
+        let (dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
+        let tracked i = disk_recovery_axiom_helper(pf);
+        (dw, Tracked(f), Tracked(i))
+    }
+
+    // Untrusted (verified) recovery helper: re-allocate ephemeral ghost state.
+    fn disk_recovery_verified_helper(Tracked(i): Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>) -> (result: (Tracked<AtomicInvariant::<DiskInvParam, DiskCrashState, DiskInvParam>>, Tracked<Frac<PtrState>>))
+    {
+        // Destroy the invariant; we will re-allocate a new one with a different ptr_state_id.
+        let ghost mut iparam = i.constant();
+        let tracked inner = i.into_inner();
+
+        let tracked mut ps = Frac::new(inner.ptr_state@);
+        proof {
+            inner.ptr_state = ps.split(1);
+            iparam.ptr_state_id = ps.id();
+        }
+
+        // Allocate a new invariant.
+        let tracked i = AtomicInvariant::<_, _, DiskInvParam>::new(iparam, inner, i.namespace());
+
+        (Tracked(i), Tracked(ps))
+    }
+
+    fn test_inv_recover() {
+        let (mut dw, Tracked(mut f), Tracked(i)) = disk_recovery_axiom();
+
+        // Re-allocate ptr_state_frac.
+        let (Tracked(i), Tracked(mut ps)) = disk_recovery_verified_helper(Tracked(i));
+
+        // XXX TBD
     }
 
     // Lower-level test of writing to disk addresses with full ownership of crash resources.
