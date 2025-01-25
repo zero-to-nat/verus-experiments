@@ -1,21 +1,33 @@
 mod disk;
 
+use std::sync::Arc;
+
 use disk::vecdisk::*;
 use disk::disk_wrap::*;
 use disk::logatom::*;
 use disk::seq_view::*;
+use disk::frac::*;
+
 use vstd::prelude::*;
 use vstd::invariant::*;
 
 verus! {
+    enum PtrState {
+        A,
+        B,
+        Either,
+    }
+
     struct DiskCrashState {
         ptr: SeqFrac<u8>,
         a: SeqFrac<u8>,
         b: SeqFrac<u8>,
+        ptr_state: Frac<PtrState>,
     }
 
     struct DiskInvParam {
         persist_id: int,
+        ptr_state_id: int,
         ptr_addr: usize,
         a_addr: usize,
         b_addr: usize,
@@ -23,23 +35,33 @@ verus! {
     }
 
     impl InvariantPredicate<DiskInvParam, DiskCrashState> for DiskInvParam {
-        closed spec fn inv(k: DiskInvParam, v: DiskCrashState) -> bool {
-            &&& v.ptr.valid(k.persist_id)
-            &&& v.ptr.off() == k.ptr_addr
-            &&& v.ptr@.len() == 1
+        closed spec fn inv(k: DiskInvParam, inner: DiskCrashState) -> bool {
+            &&& inner.ptr.valid(k.persist_id)
+            &&& inner.ptr.off() == k.ptr_addr
+            &&& inner.ptr@.len() == 1
 
-            &&& v.a.valid(k.persist_id)
-            &&& v.a.off() == k.a_addr
-            &&& v.a@.len() == 2
+            &&& inner.ptr_state.valid(k.ptr_state_id, 1)
 
-            &&& v.b.valid(k.persist_id)
-            &&& v.b.off() == k.b_addr
-            &&& v.b@.len() == 2
+            &&& inner.a.valid(k.persist_id)
+            &&& inner.a.off() == k.a_addr
+            &&& inner.a@.len() == 2
 
-            &&& if v.ptr@[0] == 0 {
-                    v.a@[0] + v.a@[1] == k.total
-                } else {
-                    v.b@[0] + v.b@[1] == k.total
+            &&& inner.b.valid(k.persist_id)
+            &&& inner.b.off() == k.b_addr
+            &&& inner.b@.len() == 2
+
+            &&& (inner.ptr_state@ == PtrState::A || inner.ptr_state@ == PtrState::Either) ==> inner.a@[0] + inner.a@[1] == k.total
+            &&& (inner.ptr_state@ == PtrState::B || inner.ptr_state@ == PtrState::Either) ==> inner.b@[0] + inner.b@[1] == k.total
+
+            &&& {
+                ||| {
+                    &&& inner.ptr@[0] == 0
+                    &&& (inner.ptr_state@ == PtrState::A || inner.ptr_state@ == PtrState::Either)
+                    }
+                ||| {
+                    &&& inner.ptr@[0] == 1
+                    &&& (inner.ptr_state@ == PtrState::B || inner.ptr_state@ == PtrState::Either)
+                    }
                 }
         }
     }
@@ -98,8 +120,188 @@ verus! {
         }
     }
 
+    // Writing to a block that's currently unused.
+    struct InactiveWriter<'a> {
+        ptr_state_frac: &'a Frac<PtrState>,
+        inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
+        credit: OpenInvariantCredit,
+    }
+
+    impl<'a> MutLinearizer<WriteOp> for InactiveWriter<'a> {
+        type ApplyResult = ();
+
+        closed spec fn namespace(self) -> int {
+            self.inv.namespace()
+        }
+
+        closed spec fn pre(self, op: WriteOp) -> bool {
+            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& op.persist_id == self.inv.constant().persist_id
+            &&& op.data.len() == 2
+            &&& self.inv.constant().a_addr != self.inv.constant().b_addr
+            &&& {
+                ||| op.addr == self.inv.constant().a_addr && self.ptr_state_frac@ == PtrState::B
+                ||| op.addr == self.inv.constant().b_addr && self.ptr_state_frac@ == PtrState::A
+                }
+        }
+
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) {
+            let tracked mut mself = self;
+            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+                mself.ptr_state_frac.agree(&inner.ptr_state);
+
+                if op.addr == self.inv.constant().a_addr {
+                    inner.a.agree(r);
+                    inner.a.update(r, pstate);
+                } else {
+                    inner.b.agree(r);
+                    inner.b.update(r, pstate);
+                }
+            });
+        }
+    }
+
+    // Flushing to ensure that the inactive range is prepared to be made active.
+    struct PreparingFlush<'a> {
+        ptr_state_frac: Frac<PtrState>,
+        preparing_frac: &'a SeqFrac<u8>,
+        inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
+        credit: OpenInvariantCredit,
+    }
+
+    impl<'a> ReadLinearizer<FlushOp> for PreparingFlush<'a> {
+        type ApplyResult = Frac<PtrState>;
+
+        closed spec fn namespace(self) -> int {
+            self.inv.namespace()
+        }
+
+        closed spec fn pre(self, op: FlushOp) -> bool {
+            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.preparing_frac.valid(op.id)
+            &&& self.preparing_frac@[0] + self.preparing_frac@[1] == self.inv.constant().total
+            &&& op.persist_id == self.inv.constant().persist_id
+            &&& self.preparing_frac@.len() == 2
+            &&& {
+                ||| {
+                    &&& self.preparing_frac.off() == self.inv.constant().a_addr
+                    &&& self.ptr_state_frac@ == PtrState::B
+                    }
+                ||| {
+                    &&& self.preparing_frac.off() == self.inv.constant().b_addr
+                    &&& self.ptr_state_frac@ == PtrState::A
+                    }
+                }
+        }
+
+        closed spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
+            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
+            &&& ar@ == PtrState::Either
+        }
+
+        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
+            let tracked mut mself = self;
+            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+                mself.ptr_state_frac.combine(inner.ptr_state);
+                mself.preparing_frac.agree(&r.latest);
+                inner.a.agree(&r.persist);
+                inner.b.agree(&r.persist);
+                mself.ptr_state_frac.update(PtrState::Either);
+                inner.ptr_state = mself.ptr_state_frac.split(1);
+            });
+            mself.ptr_state_frac
+        }
+    }
+
+    // Flipping the pointer.
+    struct CommittingWriter {
+        ptr_state_frac: Frac<PtrState>,
+        inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
+        credit: OpenInvariantCredit,
+    }
+
+    impl MutLinearizer<WriteOp> for CommittingWriter {
+        type ApplyResult = Frac<PtrState>;
+
+        closed spec fn namespace(self) -> int {
+            self.inv.namespace()
+        }
+
+        closed spec fn pre(self, op: WriteOp) -> bool {
+            &&& op.persist_id == self.inv.constant().persist_id
+            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_state_frac@ == PtrState::Either
+            &&& op.addr == self.inv.constant().ptr_addr
+            &&& (op.data =~= seq![0u8] || op.data =~= seq![1u8])
+        }
+
+        closed spec fn post(self, op: WriteOp, r: (), ar: Frac<PtrState>) -> bool {
+            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
+            &&& ar@ == PtrState::Either
+        }
+
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) -> (tracked result: Frac<PtrState>) {
+            let tracked mut mself = self;
+            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+                mself.ptr_state_frac.agree(&inner.ptr_state);
+                inner.ptr.agree(r);
+                inner.ptr.update(r, pstate);
+            });
+            mself.ptr_state_frac
+        }
+    }
+
+    // Flushing after a pointer update.
+    struct CommittingFlush<'a> {
+        ptr_state_frac: Frac<PtrState>,
+        ptr_latest: &'a SeqFrac<u8>,
+        inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
+        credit: OpenInvariantCredit,
+    }
+
+    impl<'a> ReadLinearizer<FlushOp> for CommittingFlush<'a> {
+        type ApplyResult = Frac<PtrState>;
+
+        closed spec fn namespace(self) -> int {
+            self.inv.namespace()
+        }
+
+        closed spec fn pre(self, op: FlushOp) -> bool {
+            &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
+            &&& self.ptr_latest.valid(op.id)
+            &&& self.inv.constant().persist_id == op.persist_id
+            &&& self.ptr_latest.off() == self.inv.constant().ptr_addr
+        }
+
+        closed spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
+            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
+            &&& {
+                ||| self.ptr_latest@[0] == 0 && ar@ == PtrState::A
+                ||| self.ptr_latest@[0] == 1 && ar@ == PtrState::B
+                }
+        }
+
+        proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
+            let tracked mut mself = self;
+            mself.ptr_latest.agree(&r.latest);
+            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+                inner.ptr.agree(&r.persist);
+
+                mself.ptr_state_frac.combine(inner.ptr_state);
+                if self.ptr_latest@[0] == 0 {
+                    mself.ptr_state_frac.update(PtrState::A);
+                } else {
+                    mself.ptr_state_frac.update(PtrState::B);
+                }
+                inner.ptr_state = mself.ptr_state_frac.split(1);
+            });
+            mself.ptr_state_frac
+        }
+    }
+
     // Test of separation-logic interface with invariant ownership of crash (persist) resources.
-    fn test_inv() {
+    // test_inv_init() sets up the disk and allocates the invariant for the first time, like mkfs.
+    fn test_inv_init() {
         let d = Disk::new(5);
         let (mut dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
 
@@ -112,14 +314,18 @@ verus! {
         let tracked mut f3 = f1.split(2);
         let tracked mut pf3 = pf1.split(2);
 
+        let tracked mut ps = Frac::new(PtrState::A);
+
         let tracked crashstate = DiskCrashState{
             ptr: pf,
             a: pf1,
             b: pf3,
+            ptr_state: ps.split(1),
         };
 
         let ghost iparam = DiskInvParam{
             persist_id: pf.id(),
+            ptr_state_id: ps.id(),
             ptr_addr: 0,
             a_addr: 1,
             b_addr: 3,
@@ -127,8 +333,47 @@ verus! {
         };
 
         let tracked i = AtomicInvariant::<_, _, DiskInvParam>::new(iparam, crashstate, 12345);
+        let tracked i = Arc::new(i);
 
-        
+        // Write new data to area B; allowed because it's not the active area.
+        let credit = create_open_invariant_credit();
+        dw.write::<InactiveWriter>(3, &[1, 9], Tracked(&mut f3), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+
+        // Flush the new data in area B so it's ready to commit.
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f3, inv: i.clone(), credit: credit.get() }));
+
+        // Flip the pointer: either area A or B could be there on crash, and either is valid.
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.write::<CommittingWriter>(0, &[1], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+        assert(ps@ == PtrState::Either);
+
+        // Flush the pointer, so we know it's definitely area B that's durable now.
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        assert(ps@ == PtrState::B);
+
+        // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
+        // Then write valid data.
+        let credit = create_open_invariant_credit();
+        dw.write::<InactiveWriter>(1, &[0, 0], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+
+        let credit = create_open_invariant_credit();
+        dw.write::<InactiveWriter>(1, &[2, 8], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+
+        // Flush the new contents of area A before commit.
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f1, inv: i.clone(), credit: credit.get() }));
+
+        // Write and commit the pointer, switching back to area A.
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.write::<CommittingWriter>(0, &[0], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+        assert(ps@ == PtrState::Either);
+
+        let credit = create_open_invariant_credit();
+        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        assert(ps@ == PtrState::A);
+
     }
 
     // Lower-level test of writing to disk addresses with full ownership of crash resources.
@@ -157,6 +402,6 @@ verus! {
 
     fn main() {
         test_rw();
-        test_inv();
+        test_inv_init();
     }
 }
