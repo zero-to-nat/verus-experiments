@@ -228,6 +228,23 @@ verus! {
         }
     }
 
+    impl<'a> PreparingFlush<'a> {
+        fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(pf): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+            ensures
+                result@.ptr_state_frac == ps,
+                result@.preparing_frac == pf,
+                result@.inv == i,
+        {
+            let credit = create_open_invariant_credit();
+            Tracked(Self{
+                ptr_state_frac: ps,
+                preparing_frac: pf,
+                inv: i.clone(),
+                credit: credit.get(),
+            })
+        }
+    }
+
     // Flipping the pointer.
     struct CommittingWriter {
         ptr_state_frac: Frac<PtrState>,
@@ -356,8 +373,7 @@ verus! {
         dw.write(3, &[1, 9], Tracked(&mut f3), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
         // Flush the new data in area B so it's ready to commit.
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f3, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f3), Tracked(&i)));
 
         // Flip the pointer: either area A or B could be there on crash, and either is valid.
         let credit = create_open_invariant_credit();
@@ -375,8 +391,7 @@ verus! {
         dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
         // Flush the new contents of area A before commit.
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f1, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
         // Write and commit the pointer, switching back to area A.
         let credit = create_open_invariant_credit();
@@ -469,8 +484,7 @@ verus! {
             dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
             // Flush the new contents of area A before commit.
-            let credit = create_open_invariant_credit();
-            let Tracked(ps) = dw.flush::<PreparingFlush>(Tracked(PreparingFlush{ ptr_state_frac: ps, preparing_frac: &f1, inv: i.clone(), credit: credit.get() }));
+            let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
             // Write and commit the pointer, switching back to area A.
             let credit = create_open_invariant_credit();
