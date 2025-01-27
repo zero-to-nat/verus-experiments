@@ -95,6 +95,15 @@ verus! {
         }
     }
 
+    impl OwningWriter {
+        fn new(Tracked(pf): Tracked<SeqFrac<u8>>) -> (result: Tracked<Self>)
+            ensures
+                result@.frac == pf,
+        {
+            Tracked(Self{ frac: pf })
+        }
+    }
+
     // Flushing to learn that a particular range is now consistently on-disk.
     struct OwningFlush<'a> {
         latest_frac: &'a SeqFrac<u8>,
@@ -118,6 +127,19 @@ verus! {
         proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: ()) {
             self.latest_frac.agree(&r.latest);
             self.persist_frac.agree(&r.persist);
+        }
+    }
+
+    impl<'a> OwningFlush<'a> {
+        fn new(Tracked(lf): Tracked<&'a SeqFrac<u8>>, Tracked(pf): Tracked<&'a SeqFrac<u8>>) -> (result: Tracked<Self>)
+            ensures
+                result@.latest_frac == lf,
+                result@.persist_frac == pf,
+        {
+            Tracked(Self{
+                latest_frac: lf,
+                persist_frac: pf,
+            })
         }
     }
 
@@ -283,6 +305,21 @@ verus! {
         }
     }
 
+    impl CommittingWriter {
+        fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+            ensures
+                result@.ptr_state_frac == ps,
+                result@.inv == i,
+        {
+            let credit = create_open_invariant_credit();
+            Tracked(Self{
+                ptr_state_frac: ps,
+                inv: i.clone(),
+                credit: credit.get(),
+            })
+        }
+    }
+
     // Flushing after a pointer update.
     struct CommittingFlush<'a> {
         ptr_state_frac: Frac<PtrState>,
@@ -331,6 +368,23 @@ verus! {
         }
     }
 
+    impl<'a> CommittingFlush<'a> {
+        fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(pl): Tracked<&'a SeqFrac<u8>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+            ensures
+                result@.ptr_state_frac == ps,
+                result@.ptr_latest == pl,
+                result@.inv == i,
+        {
+            let credit = create_open_invariant_credit();
+            Tracked(Self{
+                ptr_state_frac: ps,
+                ptr_latest: pl,
+                inv: i.clone(),
+                credit: credit.get(),
+            })
+        }
+    }
+
     // Test of separation-logic interface with invariant ownership of crash (persist) resources.
     //
     // test_inv_init() sets up the disk and allocates the invariant for the first time, like mkfs.
@@ -340,8 +394,8 @@ verus! {
         let d = Disk::new(5);
         let (mut dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
 
-        let Tracked(mut pf) = dw.write::<OwningWriter>(0, &[0, 5, 5, 3, 7], Tracked(&mut f), Tracked(OwningWriter{ frac: pf }));
-        dw.flush::<OwningFlush>(Tracked(OwningFlush{ latest_frac: &f, persist_frac: &pf }));
+        let Tracked(mut pf) = dw.write(0, &[0, 5, 5, 3, 7], Tracked(&mut f), OwningWriter::new(Tracked(pf)));
+        dw.flush(OwningFlush::new(Tracked(&f), Tracked(&pf)));
 
         let tracked mut f1 = f.split(1);
         let tracked mut pf1 = pf.split(1);
@@ -376,13 +430,11 @@ verus! {
         let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f3), Tracked(&i)));
 
         // Flip the pointer: either area A or B could be there on crash, and either is valid.
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.write::<CommittingWriter>(0, &[1], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.write(0, &[1], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
         assert(ps@ == PtrState::Either);
 
         // Flush the pointer, so we know it's definitely area B that's durable now.
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
         assert(ps@ == PtrState::B);
 
         // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
@@ -394,12 +446,10 @@ verus! {
         let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
         // Write and commit the pointer, switching back to area A.
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.write::<CommittingWriter>(0, &[0], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.write(0, &[0], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
         assert(ps@ == PtrState::Either);
 
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
         assert(ps@ == PtrState::A);
     }
 
@@ -468,8 +518,7 @@ verus! {
 
         // Superfluous flush: establish that ps@ is either A or B.
         // Really, we should know that f@ == pf@ (persistent state).
-        let credit = create_open_invariant_credit();
-        let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+        let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
         assert(ps@ == PtrState::A || ps@ == PtrState::B);
 
         let ptr = dw.read(0, 1, Tracked(&f));
@@ -487,12 +536,10 @@ verus! {
             let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
             // Write and commit the pointer, switching back to area A.
-            let credit = create_open_invariant_credit();
-            let Tracked(ps) = dw.write::<CommittingWriter>(0, &[0], Tracked(&mut f), Tracked(CommittingWriter{ ptr_state_frac: ps, inv: i.clone(), credit: credit.get() }));
+            let Tracked(ps) = dw.write(0, &[0], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
             assert(ps@ == PtrState::Either);
 
-            let credit = create_open_invariant_credit();
-            let Tracked(ps) = dw.flush::<CommittingFlush>(Tracked(CommittingFlush{ ptr_state_frac: ps, ptr_latest: &f, inv: i.clone(), credit: credit.get() }));
+            let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
             assert(ps@ == PtrState::A);
         }
     }
@@ -510,8 +557,8 @@ verus! {
 
         assert(f0@ == seq![0u8, 0u8, 0u8, 0u8]);
 
-        let Tracked(pf0) = dw.write::<OwningWriter>(0, &[120, 121, 122, 123], Tracked(&mut f0), Tracked(OwningWriter{ frac: pf0 }));
-        let Tracked(pf4) = dw.write::<OwningWriter>(4, &[124, 125, 126, 127], Tracked(&mut f4), Tracked(OwningWriter{ frac: pf4 }));
+        let Tracked(pf0) = dw.write(0, &[120, 121, 122, 123], Tracked(&mut f0), OwningWriter::new(Tracked(pf0)));
+        let Tracked(pf4) = dw.write(4, &[124, 125, 126, 127], Tracked(&mut f4), OwningWriter::new(Tracked(pf4)));
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);
 
