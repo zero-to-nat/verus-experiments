@@ -6,6 +6,9 @@ verus! {
         type ExecResult /* = () */; // executable result returned from operation
 
         spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool;
+        open spec fn ensures(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            true
+        }
     }
 
     pub trait MutOperation : Sized {
@@ -37,6 +40,7 @@ verus! {
                 self.pre(op),
                 op.requires(*r, *e),
             ensures
+                op.ensures(*r, *e),
                 self.post(op, *e, out),
             opens_invariants
                 [ self.namespace() ];
