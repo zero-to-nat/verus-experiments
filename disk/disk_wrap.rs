@@ -52,6 +52,41 @@ verus! {
         }
     }
 
+    pub struct ValidateOp {
+        pub id: int,
+        pub addr: usize,
+        pub len: usize,
+    }
+
+    impl ReadOperation for ValidateOp {
+        type Resource = SeqAuth<u8>;
+        type ExecResult = ();
+
+        open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            &&& r.valid(self.id)
+        }
+
+        open spec fn ensures(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            &&& self.addr + self.len <= r@.len()
+        }
+    }
+
+    pub struct ReadOp {
+        pub id: int,
+        pub addr: usize,
+        pub len: usize,
+    }
+
+    impl ReadOperation for ReadOp {
+        type Resource = SeqAuth<u8>;
+        type ExecResult = Vec<u8>;
+
+        open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+            &&& r.valid(self.id)
+            &&& e@ == r@.subrange(self.addr as int, self.addr + self.len as int)
+        }
+    }
+
     impl DiskWrap {
         pub closed spec fn inv(self) -> bool
         {
@@ -73,19 +108,23 @@ verus! {
             self.r@.persist.id()
         }
 
-        pub fn read(&self, a: usize, len: usize, Tracked(perm): Tracked<&SeqFrac<u8>>) -> (result: Vec<u8>)
+        pub fn read<Validate, Lin>(&self, a: usize, len: usize, Tracked(validate): Tracked<Validate>, Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
+            where
+                Validate: ReadLinearizer<ValidateOp>,
+                Lin: ReadLinearizer<ReadOp>,
             requires
                 self.inv(),
-                perm.valid(self.id()),
-                perm.off() == a,
-                perm@.len() == len,
+                validate.pre(ValidateOp{ id: self.id(), addr: a, len: len }),
+                lin.pre(ReadOp{ id: self.id(), addr: a, len: len }),
             ensures
-                result@ =~= perm@,
+                lin.post(ReadOp{ id: self.id(), addr: a, len: len }, result.0, result.1@),
         {
             proof {
-                perm.agree(&self.r.borrow().latest);
+                validate.apply(ValidateOp{ id: self.id(), addr: a, len: len }, &self.r.borrow().latest, &());
             }
-            self.d.read(a, len)
+            let r = self.d.read(a, len);
+            let lin_r = Tracked(lin.apply(ReadOp{ id: self.id(), addr: a, len: len }, &self.r.borrow().latest, &r));
+            (r, lin_r)
         }
 
         pub fn write<Lin>(&mut self, a: usize, v: &[u8],

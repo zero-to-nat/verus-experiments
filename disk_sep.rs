@@ -67,6 +67,68 @@ verus! {
         }
     }
 
+    struct OwningValidator<'a> {
+        latest_frac: &'a SeqFrac<u8>,
+    }
+
+    impl<'a> ReadLinearizer<ValidateOp> for OwningValidator<'a> {
+        type ApplyResult = ();
+
+        closed spec fn pre(self, op: ValidateOp) -> bool {
+            &&& self.latest_frac.valid(op.id)
+            &&& self.latest_frac.off() <= op.addr
+            &&& op.addr + op.len <= self.latest_frac.off() + self.latest_frac@.len()
+        }
+
+        proof fn apply(tracked self, op: ValidateOp, tracked r: &SeqAuth<u8>, e: &()) -> (tracked result: ()) {
+            self.latest_frac.agree(r);
+        }
+    }
+
+    impl<'a> OwningValidator<'a> {
+        fn new(Tracked(f): Tracked<&'a SeqFrac<u8>>) -> (result: Tracked<Self>)
+            ensures
+                result@.latest_frac == f
+        {
+            Tracked(Self{
+                latest_frac: f,
+            })
+        }
+    }
+
+    struct OwningReader<'a> {
+        latest_frac: &'a SeqFrac<u8>,
+    }
+
+    impl<'a> ReadLinearizer<ReadOp> for OwningReader<'a> {
+        type ApplyResult = ();
+
+        closed spec fn pre(self, op: ReadOp) -> bool {
+            &&& self.latest_frac.valid(op.id)
+            &&& self.latest_frac.off() <= op.addr
+            &&& op.addr + op.len <= self.latest_frac.off() + self.latest_frac@.len()
+        }
+
+        closed spec fn post(self, op: ReadOp, e: Vec<u8>, ar: ()) -> bool {
+            &&& e@ =~= self.latest_frac@.subrange(op.addr - self.latest_frac.off(), op.addr + op.len - self.latest_frac.off())
+        }
+
+        proof fn apply(tracked self, op: ReadOp, tracked r: &SeqAuth<u8>, e: &Vec<u8>) -> (tracked result: ()) {
+            self.latest_frac.agree(r);
+        }
+    }
+
+    impl<'a> OwningReader<'a> {
+        fn new(Tracked(f): Tracked<&'a SeqFrac<u8>>) -> (result: Tracked<Self>)
+            ensures
+                result@.latest_frac == f
+        {
+            Tracked(Self{
+                latest_frac: f,
+            })
+        }
+    }
+
     // Writing to an address where we fully own the crash resource.
     struct OwningWriter {
         frac: SeqFrac<u8>,
@@ -521,7 +583,7 @@ verus! {
         let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
         assert(ps@ == PtrState::A || ps@ == PtrState::B);
 
-        let ptr = dw.read(0, 1, Tracked(&f));
+        let (ptr, _) = dw.read(0, 1, OwningValidator::new(Tracked(&f)), OwningReader::new(Tracked(&f)));
         if ptr[0] == 0 {
             assert(ps@ == PtrState::A);
         } else {
@@ -562,9 +624,9 @@ verus! {
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);
 
-        let x = dw.read(0, 4, Tracked(&f0));
+        let (x, _) = dw.read(0, 4, OwningValidator::new(Tracked(&f0)), OwningReader::new(Tracked(&f0)));
         assert(x@ == seq![120u8, 121u8, 122u8, 123u8]);
-        let x = dw.read(4, 4, Tracked(&f4));
+        let (x, _) = dw.read(4, 4, OwningValidator::new(Tracked(&f4)), OwningReader::new(Tracked(&f4)));
         assert(x@ == seq![124u8, 125u8, 126u8, 127u8]);
     }
 
