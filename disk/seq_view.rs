@@ -37,8 +37,6 @@ verus! {
         }
 
         pub proof fn new(s: Seq<V>) -> (tracked result: (SeqAuth<V>, SeqFrac<V>))
-            requires
-                s.len() > 0,
             ensures
                 result.0.inv(),
                 result.0@ =~= s,
@@ -71,7 +69,6 @@ verus! {
         {
             &&& self.frac.inv()
             &&& self.frac@.dom() =~= Set::new(|i: int| self.off <= i < self.off + self.len)
-            &&& self.len > 0
         }
 
         pub closed spec fn view(self) -> Seq<V>
@@ -94,20 +91,23 @@ verus! {
                 self.valid(auth.id()),
                 auth.inv(),
             ensures
-                self@ =~= auth@.subrange(self.off() as int, self.off() + self@.len() as int),
-                self@.len() > 0,
-                self.off() + self@.len() <= auth@.len(),
+                self@.len() > 0 ==> {
+                    &&& self@ =~= auth@.subrange(self.off() as int, self.off() + self@.len() as int)
+                    &&& self.off() + self@.len() <= auth@.len()
+                }
         {
             self.frac.agree(&auth.auth);
 
-            assert(self.frac@.contains_key(self.off + self.len - 1));
-            assert(auth.auth@.contains_key(self.off + self.len - 1));
-            assert(self.off + self.len - 1 < auth@.len());
+            if self@.len() > 0 {
+                assert(self.frac@.contains_key(self.off + self.len - 1));
+                assert(auth.auth@.contains_key(self.off + self.len - 1));
+                assert(self.off + self.len - 1 < auth@.len());
 
-            assert forall|i: int| 0 <= i < self.len implies #[trigger] self.frac@[self.off + i] == auth@[self.off + i] by {
-                assert(self.frac@.contains_key(self.off + i));
-                assert(auth.auth@.contains_key(self.off + i));
-            };
+                assert forall|i: int| 0 <= i < self.len implies #[trigger] self.frac@[self.off + i] == auth@[self.off + i] by {
+                    assert(self.frac@.contains_key(self.off + i));
+                    assert(auth.auth@.contains_key(self.off + i));
+                };
+            }
         }
 
         pub proof fn agree_map(tracked self: &SeqFrac<V>, tracked auth: &MapAuth<int, V>)
@@ -115,7 +115,6 @@ verus! {
                 self.valid(auth.id()),
                 auth.inv(),
             ensures
-                self@.len() > 0,
                 forall |i| 0 <= i < self@.len() ==> #[trigger] auth@.contains_key(self.off() + i) && auth@[self.off() + i] == self@[i],
         {
             self.frac.agree(&auth);

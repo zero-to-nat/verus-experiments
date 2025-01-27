@@ -27,7 +27,9 @@ verus! {
 
         open spec fn requires(self, pstate: Seq<u8>, r: Self::Resource, e: ()) -> bool {
             &&& r.valid(self.persist_id)
-            &&& can_result_from_write(pstate, r@.subrange(self.addr as int, self.addr+self.data.len()), 0, self.data)
+            &&& can_result_from_write(pstate,
+                                      if self.data.len() > 0 { r@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
+                                      0, self.data)
         }
 
         open spec fn ensures(self, pstate: Seq<u8>, pre: Self::Resource, post: Self::Resource) -> bool {
@@ -67,7 +69,7 @@ verus! {
         }
 
         open spec fn ensures(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& self.addr + self.len <= r@.len()
+            &&& self.len > 0 ==> self.addr + self.len <= r@.len()
         }
     }
 
@@ -83,7 +85,7 @@ verus! {
 
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
             &&& r.valid(self.id)
-            &&& e@ == r@.subrange(self.addr as int, self.addr + self.len as int)
+            &&& e@ == if self.len > 0 { r@.subrange(self.addr as int, self.addr + self.len as int) } else { Seq::empty() }
         }
     }
 
@@ -153,7 +155,9 @@ verus! {
             self.d.write(a, v);
             Tracked({
                 perm.update(&mut self.r.borrow_mut().latest, v@);
-                p_lin.apply(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }, self.d.persist().subrange(a as int, a+v.len()), &mut self.r.borrow_mut().persist, &())
+                p_lin.apply(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ },
+                            if v.len() > 0 { self.d.persist().subrange(a as int, a+v.len()) } else { Seq::empty() },
+                            &mut self.r.borrow_mut().persist, &())
             })
         }
 

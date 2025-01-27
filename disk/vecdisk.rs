@@ -85,7 +85,7 @@ verus! {
                 self.inv(),
                 len > 0 ==> a + len <= self@.len(),
             ensures
-                result@ == self@.subrange(a as int, a + len as nat),
+                result@ == if len > 0 { self@.subrange(a as int, a + len as nat) } else { Seq::empty() },
         {
             copy_from_slice(&self.store[a..a+len])
         }

@@ -183,7 +183,7 @@ verus! {
         }
 
         closed spec fn post(self, op: FlushOp, r: (), ar: ()) -> bool {
-            &&& self.latest_frac@ == self.persist_frac@
+            &&& self.latest_frac@ =~= self.persist_frac@
         }
 
         proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: ()) {
@@ -402,6 +402,7 @@ verus! {
             &&& self.ptr_latest.valid(op.id)
             &&& self.inv.constant().persist_id == op.persist_id
             &&& self.ptr_latest.off() == ptr_addr
+            &&& self.ptr_latest@.len() == 1
         }
 
         closed spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
