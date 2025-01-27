@@ -12,6 +12,11 @@ use vstd::prelude::*;
 use vstd::invariant::*;
 
 verus! {
+    const ptr_addr: usize = 0;
+    const a_addr: usize = 1;
+    const b_addr: usize = 3;
+    const total: u8 = 10;
+
     enum PtrState {
         A,
         B,
@@ -28,30 +33,26 @@ verus! {
     struct DiskInvParam {
         persist_id: int,
         ptr_state_id: int,
-        ptr_addr: usize,
-        a_addr: usize,
-        b_addr: usize,
-        total: int,
     }
 
     impl InvariantPredicate<DiskInvParam, DiskCrashState> for DiskInvParam {
         closed spec fn inv(k: DiskInvParam, inner: DiskCrashState) -> bool {
             &&& inner.ptr.valid(k.persist_id)
-            &&& inner.ptr.off() == k.ptr_addr
+            &&& inner.ptr.off() == ptr_addr
             &&& inner.ptr@.len() == 1
 
             &&& inner.ptr_state.valid(k.ptr_state_id, 1)
 
             &&& inner.a.valid(k.persist_id)
-            &&& inner.a.off() == k.a_addr
+            &&& inner.a.off() == a_addr
             &&& inner.a@.len() == 2
 
             &&& inner.b.valid(k.persist_id)
-            &&& inner.b.off() == k.b_addr
+            &&& inner.b.off() == b_addr
             &&& inner.b@.len() == 2
 
-            &&& (inner.ptr_state@ == PtrState::A || inner.ptr_state@ == PtrState::Either) ==> inner.a@[0] + inner.a@[1] == k.total
-            &&& (inner.ptr_state@ == PtrState::B || inner.ptr_state@ == PtrState::Either) ==> inner.b@[0] + inner.b@[1] == k.total
+            &&& (inner.ptr_state@ == PtrState::A || inner.ptr_state@ == PtrState::Either) ==> inner.a@[0] + inner.a@[1] == total
+            &&& (inner.ptr_state@ == PtrState::B || inner.ptr_state@ == PtrState::Either) ==> inner.b@[0] + inner.b@[1] == total
 
             &&& {
                 ||| {
@@ -138,10 +139,9 @@ verus! {
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& op.persist_id == self.inv.constant().persist_id
             &&& op.data.len() == 2
-            &&& self.inv.constant().a_addr != self.inv.constant().b_addr
             &&& {
-                ||| op.addr == self.inv.constant().a_addr && self.ptr_state_frac@ == PtrState::B
-                ||| op.addr == self.inv.constant().b_addr && self.ptr_state_frac@ == PtrState::A
+                ||| op.addr == a_addr && self.ptr_state_frac@ == PtrState::B
+                ||| op.addr == b_addr && self.ptr_state_frac@ == PtrState::A
                 }
         }
 
@@ -150,7 +150,7 @@ verus! {
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
 
-                if op.addr == self.inv.constant().a_addr {
+                if op.addr == a_addr {
                     inner.a.agree(r);
                     inner.a.update(r, pstate);
                 } else {
@@ -179,16 +179,16 @@ verus! {
         closed spec fn pre(self, op: FlushOp) -> bool {
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& self.preparing_frac.valid(op.id)
-            &&& self.preparing_frac@[0] + self.preparing_frac@[1] == self.inv.constant().total
+            &&& self.preparing_frac@[0] + self.preparing_frac@[1] == total
             &&& op.persist_id == self.inv.constant().persist_id
             &&& self.preparing_frac@.len() == 2
             &&& {
                 ||| {
-                    &&& self.preparing_frac.off() == self.inv.constant().a_addr
+                    &&& self.preparing_frac.off() == a_addr
                     &&& self.ptr_state_frac@ == PtrState::B
                     }
                 ||| {
-                    &&& self.preparing_frac.off() == self.inv.constant().b_addr
+                    &&& self.preparing_frac.off() == b_addr
                     &&& self.ptr_state_frac@ == PtrState::A
                     }
                 }
@@ -231,7 +231,7 @@ verus! {
             &&& op.persist_id == self.inv.constant().persist_id
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& self.ptr_state_frac@ == PtrState::Either
-            &&& op.addr == self.inv.constant().ptr_addr
+            &&& op.addr == ptr_addr
             &&& (op.data =~= seq![0u8] || op.data =~= seq![1u8])
         }
 
@@ -270,7 +270,7 @@ verus! {
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& self.ptr_latest.valid(op.id)
             &&& self.inv.constant().persist_id == op.persist_id
-            &&& self.ptr_latest.off() == self.inv.constant().ptr_addr
+            &&& self.ptr_latest.off() == ptr_addr
         }
 
         closed spec fn post(self, op: FlushOp, r: (), ar: Frac<PtrState>) -> bool {
@@ -329,10 +329,6 @@ verus! {
         let ghost iparam = DiskInvParam{
             persist_id: pf.id(),
             ptr_state_id: ps.id(),
-            ptr_addr: 0,
-            a_addr: 1,
-            b_addr: 3,
-            total: 10,
         };
 
         let tracked i = AtomicInvariant::<_, _, DiskInvParam>::new(iparam, crashstate, 12345);
@@ -389,12 +385,6 @@ verus! {
         ensures
             // Core postcondition: the invariant talks about contents of the recovered disk!
             result.constant().persist_id == pf.id(),
-
-            // Various constants that maybe should be elsewhere to begin with..
-            result.constant().ptr_addr == 0,
-            result.constant().a_addr == 1,
-            result.constant().b_addr == 3,
-            result.constant().total == 10,
     {
         unimplemented!();
     }
@@ -408,12 +398,6 @@ verus! {
             result.1@.off() == 0,
             result.1@@.len() == 5,
             result.2@.constant().persist_id == result.0.persist_id(),
-
-            // Various constants that maybe should be elsewhere to begin with..
-            result.2@.constant().ptr_addr == 0,
-            result.2@.constant().a_addr == 1,
-            result.2@.constant().b_addr == 3,
-            result.2@.constant().total == 10,
     {
         let d = Disk::new(5);
         let (dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
@@ -426,10 +410,6 @@ verus! {
         ensures
             result.1@.valid(result.0@.constant().ptr_state_id, 1),
             result.0@.constant().persist_id == i.constant().persist_id,
-            result.0@.constant().ptr_addr == i.constant().ptr_addr,
-            result.0@.constant().a_addr == i.constant().a_addr,
-            result.0@.constant().b_addr == i.constant().b_addr,
-            result.0@.constant().total == i.constant().total,
     {
         // Destroy the invariant; we will re-allocate a new one with a different ptr_state_id.
         let ghost mut iparam = i.constant();
