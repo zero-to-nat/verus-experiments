@@ -139,20 +139,25 @@ verus! {
 
         closed spec fn pre(self, op: WriteOp) -> bool {
             &&& self.frac.valid(op.persist_id)
-            &&& self.frac.off() == op.addr
-            &&& self.frac@.len() == op.data.len()
+            &&& self.frac.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.frac.off() + self.frac@.len()
         }
 
         closed spec fn post(self, op: WriteOp, r: (), ar: SeqFrac<u8>) -> bool {
             &&& ar.valid(op.persist_id)
-            &&& ar.off() == op.addr
-            &&& can_result_from_write(ar@, self.frac@, 0, op.data)
+            &&& ar.off() == self.frac.off()
+            &&& can_result_from_write(ar@, self.frac@, op.addr - self.frac.off(), op.data)
         }
 
         proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) -> (tracked out: SeqFrac<u8>) {
             let tracked mut mself = self;
             mself.frac.agree(r);
-            mself.frac.update(r, pstate);
+
+            let tracked mut f2 = mself.frac.split(op.addr - self.frac.off());
+            let tracked f3 = f2.split(pstate.len() as int);
+            f2.update(r, pstate);
+            mself.frac.combine(f2);
+            mself.frac.combine(f3);
             mself.frac
         }
     }
@@ -620,7 +625,11 @@ verus! {
 
         assert(f0@ == seq![0u8, 0u8, 0u8, 0u8]);
 
-        let Tracked(pf0) = dw.write(0, &[120, 121, 122, 123], Tracked(&mut f0), OwningWriter::new(Tracked(pf0)));
+        let tracked mut f2 = f0.split(2);
+        let Tracked(pf0) = dw.write(0, &[120, 121], Tracked(&mut f0), OwningWriter::new(Tracked(pf0)));
+        let Tracked(pf0) = dw.write(2, &[122, 123], Tracked(&mut f2), OwningWriter::new(Tracked(pf0)));
+        proof { f0.combine(f2); }
+
         let Tracked(pf4) = dw.write(4, &[124, 125, 126, 127], Tracked(&mut f4), OwningWriter::new(Tracked(pf4)));
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);

@@ -162,7 +162,7 @@ verus! {
         pub proof fn split(tracked self: &mut SeqFrac<V>, n: int) -> (tracked result: SeqFrac<V>)
             requires
                 old(self).inv(),
-                0 < n < old(self)@.len(),
+                0 <= n <= old(self)@.len(),
             ensures
                 self.inv(),
                 result.inv(),
@@ -193,6 +193,7 @@ verus! {
                 self.inv(),
                 self.id() == old(self).id(),
                 self@ =~= old(self)@ + r@,
+                self.off() == old(self).off(),
         {
             self.frac.combine(r.frac);
             self.len = self.len + r.len;
