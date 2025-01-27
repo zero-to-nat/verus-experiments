@@ -104,6 +104,21 @@ verus! {
             };
         }
 
+        pub proof fn agree_map(tracked self: &SeqFrac<V>, tracked auth: &MapAuth<int, V>)
+            requires
+                self.valid(auth.id()),
+                auth.inv(),
+            ensures
+                self@.len() > 0,
+                forall |i| 0 <= i < self@.len() ==> #[trigger] auth@.contains_key(self.off() + i) && auth@[self.off() + i] == self@[i],
+        {
+            self.frac.agree(&auth);
+
+            assert forall |i: int| 0 <= i < self.len implies #[trigger] auth@.contains_key(self.off + i) && self.frac@[self.off + i] == auth@[self.off + i] by {
+                assert(self.frac@.contains_key(self.off + i));
+            };
+        }
+
         pub proof fn update(tracked self: &mut SeqFrac<V>, tracked auth: &mut SeqAuth<V>, v: Seq<V>)
             requires
                 old(self).valid(old(auth).id()),
@@ -117,9 +132,26 @@ verus! {
                 self@ =~= v,
                 auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() <= i < self.off() + v.len() { v[i - self.off()] } else { old(auth)@[i] }),
         {
+            self.update_map(&mut auth.auth, v);
+        }
+
+        pub proof fn update_map(tracked self: &mut SeqFrac<V>, tracked auth: &mut MapAuth<int, V>, v: Seq<V>)
+            requires
+                old(self).valid(old(auth).id()),
+                old(auth).inv(),
+                v.len() == old(self)@.len(),
+            ensures
+                self.valid(auth.id()),
+                self.off() == old(self).off(),
+                auth.inv(),
+                auth.id() == old(auth).id(),
+                self@ =~= v,
+                auth@ =~= Map::new(|i: int| old(auth)@.contains_key(i),
+                                   |i: int| if self.off() <= i < self.off() + v.len() { v[i - self.off()] } else { old(auth)@[i] }),
+        {
             let vmap = Map::new(|i| self.off <= i < self.off + self.len, |i: int| v[i - self.off]);
-            self.frac.agree(&auth.auth);
-            self.frac.update(&mut auth.auth, vmap);
+            self.frac.agree(auth);
+            self.frac.update(auth, vmap);
         }
 
         pub proof fn split(tracked self: &mut SeqFrac<V>, n: int) -> (tracked result: SeqFrac<V>)
@@ -159,6 +191,22 @@ verus! {
         {
             self.frac.combine(r.frac);
             self.len = self.len + r.len;
+        }
+
+        // Helper to lift MapFrac's into SeqFrac's.
+        pub proof fn new(off: nat, len: nat, tracked f: MapFrac<int, V>) -> (tracked result: SeqFrac<V>)
+            requires
+                len > 0,
+                f.inv(),
+                f@.dom() == Set::new(|i: int| off <= i < off + len),
+            ensures
+                result.valid(f.id()),
+                result.off() == off,
+                result@ == Seq::new(len, |i| f@[off + i]),
+        {
+            SeqFrac{
+                off: off, len: len, frac: f,
+            }
         }
     }
 }
