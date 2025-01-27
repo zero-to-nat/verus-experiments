@@ -161,6 +161,21 @@ verus! {
         }
     }
 
+    impl<'a> InactiveWriter<'a> {
+        fn new(Tracked(ps): Tracked<&'a Frac<PtrState>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+            ensures
+                result@.ptr_state_frac == ps,
+                result@.inv == i,
+        {
+            let credit = create_open_invariant_credit();
+            Tracked(Self{
+                ptr_state_frac: ps,
+                inv: i.clone(),
+                credit: credit.get(),
+            })
+        }
+    }
+
     // Flushing to ensure that the inactive range is prepared to be made active.
     struct PreparingFlush<'a> {
         ptr_state_frac: Frac<PtrState>,
@@ -334,9 +349,11 @@ verus! {
         let tracked i = AtomicInvariant::<_, _, DiskInvParam>::new(iparam, crashstate, 12345);
         let tracked i = Arc::new(i);
 
+        // Help instantiate triggers later.
+        assert(dw.persist_id() == i.constant().persist_id);
+
         // Write new data to area B; allowed because it's not the active area.
-        let credit = create_open_invariant_credit();
-        dw.write::<InactiveWriter>(3, &[1, 9], Tracked(&mut f3), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+        dw.write(3, &[1, 9], Tracked(&mut f3), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
         // Flush the new data in area B so it's ready to commit.
         let credit = create_open_invariant_credit();
@@ -354,11 +371,8 @@ verus! {
 
         // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
         // Then write valid data.
-        let credit = create_open_invariant_credit();
-        dw.write::<InactiveWriter>(1, &[0, 0], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
-
-        let credit = create_open_invariant_credit();
-        dw.write::<InactiveWriter>(1, &[2, 8], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+        dw.write(1, &[0, 0], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
+        dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
         // Flush the new contents of area A before commit.
         let credit = create_open_invariant_credit();
@@ -451,11 +465,8 @@ verus! {
 
             // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
             // Then write valid data.
-            let credit = create_open_invariant_credit();
-            dw.write::<InactiveWriter>(1, &[0, 0], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
-
-            let credit = create_open_invariant_credit();
-            dw.write::<InactiveWriter>(1, &[2, 8], Tracked(&mut f1), Tracked(InactiveWriter{ ptr_state_frac: &ps, inv: i.clone(), credit: credit.get() }));
+            dw.write(1, &[0, 0], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
+            dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
 
             // Flush the new contents of area A before commit.
             let credit = create_open_invariant_credit();
