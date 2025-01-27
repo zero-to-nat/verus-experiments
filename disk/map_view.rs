@@ -112,6 +112,12 @@ verus! {
             self.r.loc()
         }
 
+        pub open spec fn valid(self, id: Loc) -> bool
+        {
+            &&& self.inv()
+            &&& self.id() == id
+        }
+
         pub closed spec fn view(self) -> Map<K, V>
         {
             self.r.value().auth.unwrap().unwrap()

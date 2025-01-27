@@ -25,6 +25,12 @@ verus! {
             self.auth.id()
         }
 
+        pub open spec fn valid(self, id: int) -> bool
+        {
+            &&& self.inv()
+            &&& self.id() == id
+        }
+
         pub closed spec fn view(self) -> Seq<V>
         {
             Seq::new(self.len, |i: int| self.auth@[i])

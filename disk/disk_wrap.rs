@@ -26,14 +26,12 @@ verus! {
         type ApplyHint = Seq<u8>;
 
         open spec fn requires(self, pstate: Seq<u8>, r: Self::Resource, e: ()) -> bool {
-            &&& r.inv()
-            &&& r.id() == self.persist_id
+            &&& r.valid(self.persist_id)
             &&& can_result_from_write(pstate, r@.subrange(self.addr as int, self.addr+self.data.len()), 0, self.data)
         }
 
         open spec fn ensures(self, pstate: Seq<u8>, pre: Self::Resource, post: Self::Resource) -> bool {
-            &&& post.inv()
-            &&& post.id() == self.persist_id
+            &&& post.valid(self.persist_id)
             &&& post@ == update_bytes(pre@, self.addr as int, pstate)
         }
     }
@@ -48,12 +46,8 @@ verus! {
         type ExecResult = ();
 
         open spec fn requires(self, r: Self::Resource, e: ()) -> bool {
-            &&& r.latest.inv()
-            &&& r.latest.id() == self.id
-
-            &&& r.persist.inv()
-            &&& r.persist.id() == self.persist_id
-
+            &&& r.latest.valid(self.id)
+            &&& r.persist.valid(self.persist_id)
             &&& r.latest@ == r.persist@
         }
     }
