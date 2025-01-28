@@ -221,6 +221,22 @@ verus! {
             self.len = self.len + r.len;
         }
 
+        pub proof fn disjoint(tracked &mut self, tracked other: &SeqFrac<V>)
+            requires
+                old(self).inv(),
+                other.inv(),
+                old(self).id() == other.id(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                self@ == old(self)@,
+                self@.len() == 0 || other@.len() == 0 || self.off() + self@.len() <= other.off() || other.off() + other@.len() <= self.off(),
+        {
+            self.frac.disjoint(&other.frac);
+            assert(self@.len() == 0 || self.frac@.contains_key(self.off() as int));
+            assert(other@.len() == 0 || other.frac@.contains_key(other.off() as int));
+        }
+
         // Helper to lift MapFrac's into SeqFrac's.
         pub proof fn new(off: nat, len: nat, tracked f: MapFrac<int, V>) -> (tracked result: SeqFrac<V>)
             requires

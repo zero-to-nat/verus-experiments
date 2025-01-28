@@ -302,11 +302,26 @@ verus! {
                 self.inv(),
                 self.id() == old(self).id(),
                 self@ == old(self)@.union_prefer_right(other@),
+                old(self)@.dom().disjoint(other@.dom()),
         {
             let tracked mut r = Resource::alloc(MapView::unit());
             tracked_swap(&mut self.r, &mut r);
             r.validate_2(&other.r);
             self.r = r.join(other.r);
+        }
+
+        pub proof fn disjoint(tracked &mut self, tracked other: &MapFrac<K, V>)
+            requires
+                old(self).inv(),
+                other.inv(),
+                old(self).id() == other.id(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                self@ == old(self)@,
+                self@.dom().disjoint(other@.dom()),
+        {
+            self.r.validate_2(&other.r);
         }
 
         pub proof fn split(tracked &mut self, s: Set<K>) -> (tracked result: MapFrac<K, V>)
