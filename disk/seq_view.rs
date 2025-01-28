@@ -1,5 +1,6 @@
 use vstd::prelude::*;
 use super::map_view::*;
+use super::seq_helper::*;
 
 verus! {
     pub struct SeqAuth<V> {
@@ -157,6 +158,27 @@ verus! {
             let vmap = Map::new(|i| self.off <= i < self.off + self.len, |i: int| v[i - self.off]);
             self.frac.agree(auth);
             self.frac.update(auth, vmap);
+        }
+
+        pub proof fn update_range(tracked self: &mut SeqFrac<V>, tracked auth: &mut SeqAuth<V>, off: int, v: Seq<V>)
+            requires
+                old(self).valid(old(auth).id()),
+                old(auth).inv(),
+                0 <= off,
+                off + v.len() <= old(self)@.len(),
+            ensures
+                self.valid(auth.id()),
+                self.off() == old(self).off(),
+                auth.inv(),
+                auth.id() == old(auth).id(),
+                self@ =~= update_seq(old(self)@, off, v),
+                auth@ =~= Seq::new(old(auth)@.len(), |i: int| if self.off() + off <= i < self.off() + off + v.len() { v[i - self.off() - off] } else { old(auth)@[i] }),
+        {
+            let tracked mut mid = self.split(off);
+            let tracked mut end = mid.split(v.len() as int);
+            mid.update(auth, v);
+            self.combine(mid);
+            self.combine(end);
         }
 
         pub proof fn split(tracked self: &mut SeqFrac<V>, n: int) -> (tracked result: SeqFrac<V>)

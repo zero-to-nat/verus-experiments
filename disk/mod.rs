@@ -1,3 +1,5 @@
+pub mod seq_helper;
+
 // Logical atomicity experiments, mechanizing write-restricted storage.
 pub mod frac;
 pub mod logatom;

@@ -1,4 +1,5 @@
 use vstd::prelude::*;
+use super::seq_helper::*;
 
 verus! {
     broadcast use vstd::std_specs::hash::group_hash_axioms;
@@ -6,11 +7,6 @@ verus! {
     pub struct Disk {
         store: Vec<u8>,
         persist: Ghost<Seq<u8>>,
-    }
-
-    pub open spec fn update_bytes(s: Seq<u8>, addr: int, bytes: Seq<u8>) -> Seq<u8>
-    {
-        Seq::new(s.len(), |i: int| if addr <= i < addr + bytes.len() { bytes[i - addr] } else { s[i] })
     }
 
     pub open spec fn can_result_from_write(post: Seq<u8>, pre: Seq<u8>, addr: int, bytes: Seq<u8>) -> bool
@@ -97,7 +93,7 @@ verus! {
                 v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
             ensures
                 self.inv(),
-                self@ == update_bytes(old(self)@, a as int, v@),
+                self@ == update_seq(old(self)@, a as int, v@),
                 can_result_from_write(self.persist(), old(self).persist(), a as int, v@),
         {
             self.store.splice(a..a+v.len(), v.iter().cloned());
