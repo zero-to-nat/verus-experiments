@@ -14,3 +14,4 @@ pub mod map_view;
 pub mod seq_view;
 pub mod vecdisk;
 pub mod disk_wrap;
+pub mod disk_wrap_lib;
