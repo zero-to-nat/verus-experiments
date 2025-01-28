@@ -691,5 +691,6 @@ verus! {
     fn main() {
         test_rw();
         test_inv_init();
+        test_inv_recover();
     }
 }
