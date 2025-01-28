@@ -2,6 +2,7 @@ use vstd::prelude::*;
 use super::vecdisk::*;
 use super::seq_view::*;
 use super::logatom::*;
+use super::seq_helper::*;
 
 verus! {
     pub struct DiskResources {
@@ -15,26 +16,38 @@ verus! {
     }
 
     pub struct WriteOp {
+        pub id: int,
         pub persist_id: int,
         pub addr: usize,
         pub data: Seq<u8>,
     }
 
     impl MutOperation for WriteOp {
-        type Resource = SeqAuth<u8>;
+        type Resource = DiskResources;
         type ExecResult = ();
         type ApplyHint = Seq<u8>;
 
         open spec fn requires(self, pstate: Seq<u8>, r: Self::Resource, e: ()) -> bool {
-            &&& r.valid(self.persist_id)
+            &&& r.latest.valid(self.id)
+            &&& r.persist.valid(self.persist_id)
             &&& can_result_from_write(pstate,
-                                      if self.data.len() > 0 { r@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
+                                      if self.data.len() > 0 { r.persist@.subrange(self.addr as int, self.addr+self.data.len()) } else { Seq::empty() },
                                       0, self.data)
         }
 
         open spec fn ensures(self, pstate: Seq<u8>, pre: Self::Resource, post: Self::Resource) -> bool {
-            &&& post.valid(self.persist_id)
-            &&& post@ == update_bytes(pre@, self.addr as int, pstate)
+            &&& post.latest.valid(self.id)
+            &&& post.persist.valid(self.persist_id)
+            &&& post.latest@ =~= update_seq(pre.latest@, self.addr as int, self.data)
+            &&& post.persist@ =~= update_seq(pre.persist@, self.addr as int, pstate)
+        }
+
+        open spec fn peek_requires(self, r: Self::Resource) -> bool {
+            &&& r.latest.valid(self.id)
+        }
+
+        open spec fn peek_ensures(self, r: Self::Resource) -> bool {
+            &&& self.data.len() > 0 ==> self.addr + self.data.len() <= r.latest@.len()
         }
     }
 
@@ -99,7 +112,8 @@ verus! {
             self.r@.persist.id()
         }
 
-        pub fn read<Lin>(&self, a: usize, len: usize, Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
+        pub fn read<Lin>(&self, a: usize, len: usize,
+                         Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
             where
                 Lin: ReadLinearizer<ReadOp>,
             requires
@@ -117,34 +131,26 @@ verus! {
         }
 
         pub fn write<Lin>(&mut self, a: usize, v: &[u8],
-                          Tracked(perm): Tracked<&mut SeqFrac<u8>>,
-                          Tracked(p_lin): Tracked<Lin>) -> (result: Tracked<Lin::ApplyResult>)
+                          Tracked(lin): Tracked<Lin>) -> (result: Tracked<Lin::ApplyResult>)
             where
                 Lin: MutLinearizer<WriteOp>,
             requires
                 old(self).inv(),
-                old(perm).valid(old(self).id()),
-                old(perm).off() == a,
-                old(perm)@.len() == v@.len(),
-                p_lin.pre(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }),
+                lin.pre(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ }),
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
                 self.persist_id() == old(self).persist_id(),
-                perm.valid(self.id()),
-                perm.off() == old(perm).off(),
-                perm@ =~= v@,
-                p_lin.post(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ }, (), result@),
+                lin.post(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ }, (), result@),
         {
             proof {
-                perm.agree(&self.r.borrow().latest);
+                lin.peek(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ }, self.r.borrow());
             }
             self.d.write(a, v);
             Tracked({
-                perm.update(&mut self.r.borrow_mut().latest, v@);
-                p_lin.apply(WriteOp{ persist_id: old(self).persist_id(), addr: a, data: v@ },
-                            if v.len() > 0 { self.d.persist().subrange(a as int, a+v.len()) } else { Seq::empty() },
-                            &mut self.r.borrow_mut().persist, &())
+                lin.apply(WriteOp{ id: old(self).id(), persist_id: old(self).persist_id(), addr: a, data: v@ },
+                          if v.len() > 0 { self.d.persist().subrange(a as int, a+v.len()) } else { Seq::empty() },
+                          self.r.borrow_mut(), &())
             })
         }
 

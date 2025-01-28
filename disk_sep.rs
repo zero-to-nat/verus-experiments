@@ -7,6 +7,7 @@ use disk::disk_wrap::*;
 use disk::logatom::*;
 use disk::seq_view::*;
 use disk::frac::*;
+use disk::seq_helper::*;
 
 use vstd::prelude::*;
 use vstd::invariant::*;
@@ -106,45 +107,57 @@ verus! {
 
     // Writing to an address where we fully own the crash resource.
     struct OwningWriter {
-        frac: SeqFrac<u8>,
+        latest_frac: SeqFrac<u8>,
+        persist_frac: SeqFrac<u8>,
     }
 
     impl MutLinearizer<WriteOp> for OwningWriter {
-        type ApplyResult = SeqFrac<u8>;
+        type ApplyResult = (SeqFrac<u8>, SeqFrac<u8>);
 
         closed spec fn pre(self, op: WriteOp) -> bool {
-            &&& self.frac.valid(op.persist_id)
-            &&& self.frac.off() <= op.addr
-            &&& op.addr + op.data.len() <= self.frac.off() + self.frac@.len()
+            &&& self.latest_frac.valid(op.id)
+            &&& self.latest_frac.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.latest_frac.off() + self.latest_frac@.len()
+
+            &&& self.persist_frac.valid(op.persist_id)
+            &&& self.persist_frac.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.persist_frac.off() + self.persist_frac@.len()
         }
 
-        closed spec fn post(self, op: WriteOp, r: (), ar: SeqFrac<u8>) -> bool {
-            &&& ar.valid(op.persist_id)
-            &&& ar.off() == self.frac.off()
-            &&& can_result_from_write(ar@, self.frac@, op.addr - self.frac.off(), op.data)
+        closed spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+            &&& ar.0.valid(op.id)
+            &&& ar.0.off() == self.latest_frac.off()
+            &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
+
+            &&& ar.1.valid(op.persist_id)
+            &&& ar.1.off() == self.persist_frac.off()
+            &&& can_result_from_write(ar.1@, self.persist_frac@, op.addr - self.persist_frac.off(), op.data)
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) -> (tracked out: SeqFrac<u8>) {
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked out: Self::ApplyResult) {
             let tracked mut mself = self;
-            mself.frac.agree(r);
+            mself.latest_frac.agree(&r.latest);
+            mself.persist_frac.agree(&r.persist);
 
-            let tracked mut f2 = mself.frac.split(op.addr - self.frac.off());
-            let tracked f3 = f2.split(pstate.len() as int);
-            f2.update(r, pstate);
-            mself.frac.combine(f2);
-            mself.frac.combine(f3);
-            mself.frac
+            mself.latest_frac.update_range(&mut r.latest, op.addr - self.latest_frac.off(), op.data);
+            mself.persist_frac.update_range(&mut r.persist, op.addr - self.persist_frac.off(), pstate);
+
+            (mself.latest_frac, mself.persist_frac)
         }
 
-        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &DiskResources) {
+            self.latest_frac.agree(&r.latest);
+        }
     }
 
     impl OwningWriter {
-        fn new(Tracked(pf): Tracked<SeqFrac<u8>>) -> (result: Tracked<Self>)
+        fn new(Tracked(lf): Tracked<SeqFrac<u8>>,
+               Tracked(pf): Tracked<SeqFrac<u8>>) -> (result: Tracked<Self>)
             ensures
-                result@.frac == pf,
+                result@.latest_frac == lf,
+                result@.persist_frac == pf,
         {
-            Tracked(Self{ frac: pf })
+            Tracked(Self{ latest_frac: lf, persist_frac: pf })
         }
     }
 
@@ -191,19 +204,24 @@ verus! {
 
     // Writing to a block that's currently unused.
     struct InactiveWriter<'a> {
+        latest_frac: SeqFrac<u8>,
         ptr_state_frac: &'a Frac<PtrState>,
         inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         credit: OpenInvariantCredit,
     }
 
     impl<'a> MutLinearizer<WriteOp> for InactiveWriter<'a> {
-        type ApplyResult = ();
+        type ApplyResult = SeqFrac<u8>;
 
         closed spec fn namespace(self) -> int {
             self.inv.namespace()
         }
 
         closed spec fn pre(self, op: WriteOp) -> bool {
+            &&& self.latest_frac.valid(op.id)
+            &&& self.latest_frac.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.latest_frac.off() + self.latest_frac@.len()
+
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& op.persist_id == self.inv.constant().persist_id
             &&& op.data.len() == 2
@@ -213,32 +231,49 @@ verus! {
                 }
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) {
+        closed spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+            &&& ar.valid(op.id)
+            &&& ar.off() == self.latest_frac.off()
+            &&& ar@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
+        }
+
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
             let tracked mut mself = self;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
 
                 if op.addr == a_addr {
-                    inner.a.agree(r);
-                    inner.a.update(r, pstate);
+                    inner.a.agree(&r.persist);
+                    inner.a.update(&mut r.persist, pstate);
                 } else {
-                    inner.b.agree(r);
-                    inner.b.update(r, pstate);
+                    inner.b.agree(&r.persist);
+                    inner.b.update(&mut r.persist, pstate);
                 }
             });
+
+            mself.latest_frac.agree(&r.latest);
+            mself.latest_frac.update_range(&mut r.latest, op.addr - mself.latest_frac.off(), op.data);
+
+            mself.latest_frac
         }
 
-        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &DiskResources) {
+            self.latest_frac.agree(&r.latest);
+        }
     }
 
     impl<'a> InactiveWriter<'a> {
-        fn new(Tracked(ps): Tracked<&'a Frac<PtrState>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+        fn new(Tracked(lf): Tracked<SeqFrac<u8>>,
+               Tracked(ps): Tracked<&'a Frac<PtrState>>,
+               Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
+                result@.latest_frac == lf,
                 result@.ptr_state_frac == ps,
                 result@.inv == i,
         {
             let credit = create_open_invariant_credit();
             Tracked(Self{
+                latest_frac: lf,
                 ptr_state_frac: ps,
                 inv: i.clone(),
                 credit: credit.get(),
@@ -319,19 +354,24 @@ verus! {
 
     // Flipping the pointer.
     struct CommittingWriter {
+        latest_frac: SeqFrac<u8>,
         ptr_state_frac: Frac<PtrState>,
         inv: Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>,
         credit: OpenInvariantCredit,
     }
 
     impl MutLinearizer<WriteOp> for CommittingWriter {
-        type ApplyResult = Frac<PtrState>;
+        type ApplyResult = (SeqFrac<u8>, Frac<PtrState>);
 
         closed spec fn namespace(self) -> int {
             self.inv.namespace()
         }
 
         closed spec fn pre(self, op: WriteOp) -> bool {
+            &&& self.latest_frac.valid(op.id)
+            &&& self.latest_frac.off() <= op.addr
+            &&& op.addr + op.data.len() <= self.latest_frac.off() + self.latest_frac@.len()
+
             &&& op.persist_id == self.inv.constant().persist_id
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
             &&& self.ptr_state_frac@ == PtrState::Either
@@ -339,32 +379,46 @@ verus! {
             &&& (op.data =~= seq![0u8] || op.data =~= seq![1u8])
         }
 
-        closed spec fn post(self, op: WriteOp, r: (), ar: Frac<PtrState>) -> bool {
-            &&& ar.valid(self.inv.constant().ptr_state_id, 1)
-            &&& ar@ == PtrState::Either
+        closed spec fn post(self, op: WriteOp, r: (), ar: Self::ApplyResult) -> bool {
+            &&& ar.0.valid(op.id)
+            &&& ar.0.off() == self.latest_frac.off()
+            &&& ar.0@ == update_seq(self.latest_frac@, op.addr - self.latest_frac.off(), op.data)
+
+            &&& ar.1.valid(self.inv.constant().ptr_state_id, 1)
+            &&& ar.1@ == PtrState::Either
         }
 
-        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut SeqAuth<u8>, e: &()) -> (tracked result: Frac<PtrState>) {
+        proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
             let tracked mut mself = self;
             open_atomic_invariant!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
-                inner.ptr.agree(r);
-                inner.ptr.update(r, pstate);
+                inner.ptr.agree(&r.persist);
+                inner.ptr.update(&mut r.persist, pstate);
             });
-            mself.ptr_state_frac
+
+            mself.latest_frac.agree(&r.latest);
+            mself.latest_frac.update_range(&mut r.latest, op.addr - mself.latest_frac.off(), op.data);
+
+            (mself.latest_frac, mself.ptr_state_frac)
         }
 
-        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &DiskResources) {
+            self.latest_frac.agree(&r.latest);
+        }
     }
 
     impl CommittingWriter {
-        fn new(Tracked(ps): Tracked<Frac<PtrState>>, Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
+        fn new(Tracked(lf): Tracked<SeqFrac<u8>>,
+               Tracked(ps): Tracked<Frac<PtrState>>,
+               Tracked(i): Tracked<&Arc<AtomicInvariant<DiskInvParam, DiskCrashState, DiskInvParam>>>) -> (result: Tracked<Self>)
             ensures
+                result@.latest_frac == lf,
                 result@.ptr_state_frac == ps,
                 result@.inv == i,
         {
             let credit = create_open_invariant_credit();
             Tracked(Self{
+                latest_frac: lf,
                 ptr_state_frac: ps,
                 inv: i.clone(),
                 credit: credit.get(),
@@ -449,7 +503,8 @@ verus! {
         let d = Disk::new(5);
         let (mut dw, Tracked(mut f), Tracked(mut pf)) = DiskWrap::new(d);
 
-        let Tracked(mut pf) = dw.write(0, &[0, 5, 5, 3, 7], Tracked(&mut f), OwningWriter::new(Tracked(pf)));
+        let Tracked(f_pf) = dw.write(0, &[0, 5, 5, 3, 7], OwningWriter::new(Tracked(f), Tracked(pf)));
+        let tracked (mut f, mut pf) = f_pf;
         dw.flush(OwningFlush::new(Tracked(&f), Tracked(&pf)));
 
         let tracked mut f1 = f.split(1);
@@ -479,13 +534,14 @@ verus! {
         assert(dw.persist_id() == i.constant().persist_id);
 
         // Write new data to area B; allowed because it's not the active area.
-        dw.write(3, &[1, 9], Tracked(&mut f3), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
+        let Tracked(mut f3) = dw.write(3, &[1, 9], InactiveWriter::new(Tracked(f3), Tracked(&ps), Tracked(&i)));
 
         // Flush the new data in area B so it's ready to commit.
         let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f3), Tracked(&i)));
 
         // Flip the pointer: either area A or B could be there on crash, and either is valid.
-        let Tracked(ps) = dw.write(0, &[1], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
+        let Tracked(f_ps) = dw.write(0, &[1], CommittingWriter::new(Tracked(f), Tracked(ps), Tracked(&i)));
+        let tracked (mut f, mut ps) = f_ps;
         assert(ps@ == PtrState::Either);
 
         // Flush the pointer, so we know it's definitely area B that's durable now.
@@ -494,14 +550,15 @@ verus! {
 
         // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
         // Then write valid data.
-        dw.write(1, &[0, 0], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
-        dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
+        let Tracked(mut f1) = dw.write(1, &[0, 0], InactiveWriter::new(Tracked(f1), Tracked(&ps), Tracked(&i)));
+        let Tracked(mut f1) = dw.write(1, &[2, 8], InactiveWriter::new(Tracked(f1), Tracked(&ps), Tracked(&i)));
 
         // Flush the new contents of area A before commit.
         let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
         // Write and commit the pointer, switching back to area A.
-        let Tracked(ps) = dw.write(0, &[0], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
+        let Tracked(f_ps) = dw.write(0, &[0], CommittingWriter::new(Tracked(f), Tracked(ps), Tracked(&i)));
+        let tracked (mut f, mut ps) = f_ps;
         assert(ps@ == PtrState::Either);
 
         let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
@@ -584,14 +641,15 @@ verus! {
 
             // Temporarily write bogus data to area A, but it doesn't matter because it's not active.
             // Then write valid data.
-            dw.write(1, &[0, 0], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
-            dw.write(1, &[2, 8], Tracked(&mut f1), InactiveWriter::new(Tracked(&ps), Tracked(&i)));
+            let Tracked(mut f1) = dw.write(1, &[0, 0], InactiveWriter::new(Tracked(f1), Tracked(&ps), Tracked(&i)));
+            let Tracked(mut f1) = dw.write(1, &[2, 8], InactiveWriter::new(Tracked(f1), Tracked(&ps), Tracked(&i)));
 
             // Flush the new contents of area A before commit.
             let Tracked(ps) = dw.flush(PreparingFlush::new(Tracked(ps), Tracked(&f1), Tracked(&i)));
 
             // Write and commit the pointer, switching back to area A.
-            let Tracked(ps) = dw.write(0, &[0], Tracked(&mut f), CommittingWriter::new(Tracked(ps), Tracked(&i)));
+            let Tracked(f_ps) = dw.write(0, &[0], CommittingWriter::new(Tracked(f), Tracked(ps), Tracked(&i)));
+            let tracked (mut f, mut ps) = f_ps;
             assert(ps@ == PtrState::Either);
 
             let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
@@ -613,11 +671,14 @@ verus! {
         assert(f0@ == seq![0u8, 0u8, 0u8, 0u8]);
 
         let tracked mut f2 = f0.split(2);
-        let Tracked(pf0) = dw.write(0, &[120, 121], Tracked(&mut f0), OwningWriter::new(Tracked(pf0)));
-        let Tracked(pf0) = dw.write(2, &[122, 123], Tracked(&mut f2), OwningWriter::new(Tracked(pf0)));
+        let Tracked(f0_pf0) = dw.write(0, &[120, 121], OwningWriter::new(Tracked(f0), Tracked(pf0)));
+        let tracked (mut f0, mut pf0) = f0_pf0;
+        let Tracked(f2_pf0) = dw.write(2, &[122, 123], OwningWriter::new(Tracked(f2), Tracked(pf0)));
+        let tracked (mut f2, mut pf0) = f2_pf0;
         proof { f0.combine(f2); }
 
-        let Tracked(pf4) = dw.write(4, &[124, 125, 126, 127], Tracked(&mut f4), OwningWriter::new(Tracked(pf4)));
+        let Tracked(f4_pf4) = dw.write(4, &[124, 125, 126, 127], OwningWriter::new(Tracked(f4), Tracked(pf4)));
+        let tracked (mut f4, mut pf4) = f4_pf4;
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);
 
