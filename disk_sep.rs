@@ -67,35 +67,6 @@ verus! {
         }
     }
 
-    struct OwningValidator<'a> {
-        latest_frac: &'a SeqFrac<u8>,
-    }
-
-    impl<'a> ReadLinearizer<ValidateOp> for OwningValidator<'a> {
-        type ApplyResult = ();
-
-        closed spec fn pre(self, op: ValidateOp) -> bool {
-            &&& self.latest_frac.valid(op.id)
-            &&& self.latest_frac.off() <= op.addr
-            &&& op.addr + op.len <= self.latest_frac.off() + self.latest_frac@.len()
-        }
-
-        proof fn apply(tracked self, op: ValidateOp, tracked r: &SeqAuth<u8>, e: &()) -> (tracked result: ()) {
-            self.latest_frac.agree(r);
-        }
-    }
-
-    impl<'a> OwningValidator<'a> {
-        fn new(Tracked(f): Tracked<&'a SeqFrac<u8>>) -> (result: Tracked<Self>)
-            ensures
-                result@.latest_frac == f
-        {
-            Tracked(Self{
-                latest_frac: f,
-            })
-        }
-    }
-
     struct OwningReader<'a> {
         latest_frac: &'a SeqFrac<u8>,
     }
@@ -114,6 +85,10 @@ verus! {
         }
 
         proof fn apply(tracked self, op: ReadOp, tracked r: &SeqAuth<u8>, e: &Vec<u8>) -> (tracked result: ()) {
+            self.latest_frac.agree(r);
+        }
+
+        proof fn peek(tracked &self, op: ReadOp, tracked r: &SeqAuth<u8>) {
             self.latest_frac.agree(r);
         }
     }
@@ -160,6 +135,8 @@ verus! {
             mself.frac.combine(f3);
             mself.frac
         }
+
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
     }
 
     impl OwningWriter {
@@ -195,6 +172,8 @@ verus! {
             self.latest_frac.agree(&r.latest);
             self.persist_frac.agree(&r.persist);
         }
+
+        proof fn peek(tracked &self, op: FlushOp, tracked r: &DiskResources) {}
     }
 
     impl<'a> OwningFlush<'a> {
@@ -248,6 +227,8 @@ verus! {
                 }
             });
         }
+
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
     }
 
     impl<'a> InactiveWriter<'a> {
@@ -315,6 +296,8 @@ verus! {
             });
             mself.ptr_state_frac
         }
+
+        proof fn peek(tracked &self, op: FlushOp, tracked r: &DiskResources) {}
     }
 
     impl<'a> PreparingFlush<'a> {
@@ -370,6 +353,8 @@ verus! {
             });
             mself.ptr_state_frac
         }
+
+        proof fn peek(tracked &self, op: WriteOp, tracked r: &SeqAuth<u8>) {}
     }
 
     impl CommittingWriter {
@@ -434,6 +419,8 @@ verus! {
             });
             mself.ptr_state_frac
         }
+
+        proof fn peek(tracked &self, op: FlushOp, tracked r: &DiskResources) {}
     }
 
     impl<'a> CommittingFlush<'a> {
@@ -589,7 +576,7 @@ verus! {
         let Tracked(ps) = dw.flush(CommittingFlush::new(Tracked(ps), Tracked(&f), Tracked(&i)));
         assert(ps@ == PtrState::A || ps@ == PtrState::B);
 
-        let (ptr, _) = dw.read(0, 1, OwningValidator::new(Tracked(&f)), OwningReader::new(Tracked(&f)));
+        let (ptr, _) = dw.read(0, 1, OwningReader::new(Tracked(&f)));
         if ptr[0] == 0 {
             assert(ps@ == PtrState::A);
         } else {
@@ -634,9 +621,9 @@ verus! {
 
         assert(f0@ == seq![120u8, 121u8, 122u8, 123u8]);
 
-        let (x, _) = dw.read(0, 4, OwningValidator::new(Tracked(&f0)), OwningReader::new(Tracked(&f0)));
+        let (x, _) = dw.read(0, 4, OwningReader::new(Tracked(&f0)));
         assert(x@ == seq![120u8, 121u8, 122u8, 123u8]);
-        let (x, _) = dw.read(4, 4, OwningValidator::new(Tracked(&f4)), OwningReader::new(Tracked(&f4)));
+        let (x, _) = dw.read(4, 4, OwningReader::new(Tracked(&f4)));
         assert(x@ == seq![124u8, 125u8, 126u8, 127u8]);
     }
 

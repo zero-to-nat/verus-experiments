@@ -54,25 +54,6 @@ verus! {
         }
     }
 
-    pub struct ValidateOp {
-        pub id: int,
-        pub addr: usize,
-        pub len: usize,
-    }
-
-    impl ReadOperation for ValidateOp {
-        type Resource = SeqAuth<u8>;
-        type ExecResult = ();
-
-        open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& r.valid(self.id)
-        }
-
-        open spec fn ensures(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            &&& self.len > 0 ==> self.addr + self.len <= r@.len()
-        }
-    }
-
     pub struct ReadOp {
         pub id: int,
         pub addr: usize,
@@ -86,6 +67,14 @@ verus! {
         open spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
             &&& r.valid(self.id)
             &&& e@ == if self.len > 0 { r@.subrange(self.addr as int, self.addr + self.len as int) } else { Seq::empty() }
+        }
+
+        open spec fn peek_requires(self, r: Self::Resource) -> bool {
+            &&& r.valid(self.id)
+        }
+
+        open spec fn peek_ensures(self, r: Self::Resource) -> bool {
+            &&& self.len > 0 ==> self.addr + self.len <= r@.len()
         }
     }
 
@@ -110,19 +99,17 @@ verus! {
             self.r@.persist.id()
         }
 
-        pub fn read<Validate, Lin>(&self, a: usize, len: usize, Tracked(validate): Tracked<Validate>, Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
+        pub fn read<Lin>(&self, a: usize, len: usize, Tracked(lin): Tracked<Lin>) -> (result: (Vec<u8>, Tracked<Lin::ApplyResult>))
             where
-                Validate: ReadLinearizer<ValidateOp>,
                 Lin: ReadLinearizer<ReadOp>,
             requires
                 self.inv(),
-                validate.pre(ValidateOp{ id: self.id(), addr: a, len: len }),
                 lin.pre(ReadOp{ id: self.id(), addr: a, len: len }),
             ensures
                 lin.post(ReadOp{ id: self.id(), addr: a, len: len }, result.0, result.1@),
         {
             proof {
-                validate.apply(ValidateOp{ id: self.id(), addr: a, len: len }, &self.r.borrow().latest, &());
+                lin.peek(ReadOp{ id: self.id(), addr: a, len: len }, &self.r.borrow().latest);
             }
             let r = self.d.read(a, len);
             let lin_r = Tracked(lin.apply(ReadOp{ id: self.id(), addr: a, len: len }, &self.r.borrow().latest, &r));

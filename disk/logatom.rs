@@ -6,9 +6,11 @@ verus! {
         type ExecResult /* = () */; // executable result returned from operation
 
         spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool;
-        open spec fn ensures(self, r: Self::Resource, e: Self::ExecResult) -> bool {
-            true
-        }
+
+        // Optionally support peeking, which provides initial validation
+        // before the operation is linearized.
+        open spec fn peek_requires(self, r: Self::Resource) -> bool { true }
+        open spec fn peek_ensures(self, r: Self::Resource) -> bool { true }
     }
 
     pub trait MutOperation : Sized {
@@ -18,6 +20,11 @@ verus! {
 
         spec fn requires(self, hint: Self::ApplyHint, r: Self::Resource, e: Self::ExecResult) -> bool;
         spec fn ensures(self, hint: Self::ApplyHint, pre: Self::Resource, post: Self::Resource) -> bool;
+
+        // Optionally support peeking, which provides initial validation
+        // before the operation is linearized.
+        open spec fn peek_requires(self, r: Self::Resource) -> bool { true }
+        open spec fn peek_ensures(self, r: Self::Resource) -> bool { true }
     }
 
     pub trait ReadLinearizer<Op: ReadOperation> : Sized {
@@ -40,8 +47,16 @@ verus! {
                 self.pre(op),
                 op.requires(*r, *e),
             ensures
-                op.ensures(*r, *e),
                 self.post(op, *e, out),
+            opens_invariants
+                [ self.namespace() ];
+
+        proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
+            requires
+                self.pre(op),
+                op.peek_requires(*r),
+            ensures
+                op.peek_ensures(*r),
             opens_invariants
                 [ self.namespace() ];
     }
@@ -68,6 +83,15 @@ verus! {
             ensures
                 op.ensures(hint, *old(r), *r),
                 self.post(op, *e, out),
+            opens_invariants
+                [ self.namespace() ];
+
+        proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
+            requires
+                self.pre(op),
+                op.peek_requires(*r),
+            ensures
+                op.peek_ensures(*r),
             opens_invariants
                 [ self.namespace() ];
     }
