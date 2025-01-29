@@ -229,6 +229,7 @@ verus! {
             ensures
                 self.inv(),
                 self.id() == old(self).id(),
+                self.off() == old(self).off(),
                 self@ == old(self)@,
                 self@.len() == 0 || other@.len() == 0 || self.off() + self@.len() <= other.off() || other.off() + other@.len() <= self.off(),
         {
