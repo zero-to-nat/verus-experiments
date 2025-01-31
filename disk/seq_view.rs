@@ -242,7 +242,6 @@ verus! {
         // Helper to lift MapFrac's into SeqFrac's.
         pub proof fn new(off: nat, len: nat, tracked f: MapFrac<int, V>) -> (tracked result: SeqFrac<V>)
             requires
-                len > 0,
                 f.inv(),
                 f@.dom() == Set::new(|i: int| off <= i < off + len),
             ensures
