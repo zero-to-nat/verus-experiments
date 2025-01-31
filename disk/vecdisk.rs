@@ -58,7 +58,7 @@ verus! {
                 v@.len() > 0 ==> a + v@.len() <= disklen,
             ensures
                 self.valid(disklen as nat),
-                self@ =~= old(self)@.union_prefer_right(seq_to_map_usize(v@, a)),
+                self@ =~= old(self)@.union_prefer_right(seq_to_map(v@, a)),
         {
             broadcast use vstd::map::group_map_axioms;
 
@@ -67,7 +67,7 @@ verus! {
                     old(self).valid(disklen as nat),
                     self.valid(disklen as nat),
                     v@.len() > 0 ==> a + v@.len() <= disklen,
-                    self.view() =~= old(self)@.union_prefer_right(seq_to_map_usize(v@.subrange(0, i as int), a)),
+                    self.view() =~= old(self)@.union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
             {
                 let ghost tv = self@;
                 assert(self@ =~= tv);
@@ -215,7 +215,7 @@ verus! {
                 ws.valid(old(self)@.len()),
             ensures
                 self.inv(),
-                self@ == update_seq_map_usize(old(self)@, ws@),
+                self@ == update_seq_map(old(self)@, ws@),
                 can_result_from_write_map(self.persist(), old(self).persist(), ws@),
         {
             for (&a, &v) in ws.writeset.iter() {
