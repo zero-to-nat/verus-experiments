@@ -45,7 +45,7 @@ verus! {
                 result.1.off() == 0,
                 result.1@ =~= s,
         {
-            let tracked (mauth, mfrac) = MapAuth::<int, V>::new(Map::new(|i| 0 <= i < s.len(), |i: int| s[i]));
+            let tracked (mauth, mfrac) = MapAuth::<int, V>::new(seq_to_map(s, 0));
             let tracked auth = SeqAuth{
                 len: s.len(),
                 auth: mauth,
@@ -155,7 +155,7 @@ verus! {
                 auth@ =~= Map::new(|i: int| old(auth)@.contains_key(i),
                                    |i: int| if self.off() <= i < self.off() + v.len() { v[i - self.off()] } else { old(auth)@[i] }),
         {
-            let vmap = Map::new(|i| self.off <= i < self.off + self.len, |i: int| v[i - self.off]);
+            let vmap = seq_to_map(v, self.off as int);
             self.frac.agree(auth);
             self.frac.update(auth, vmap);
         }
