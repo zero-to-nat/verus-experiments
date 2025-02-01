@@ -140,6 +140,16 @@ verus! {
             r
         }
 
+        pub proof fn empty(tracked &self) -> (tracked result: MapFrac<K, V>)
+            requires
+                self.inv(),
+            ensures
+                result.valid(self.id()),
+                result@ == Map::<K, V>::empty(),
+        {
+            MapFrac::<K, V>::empty(self.id())
+        }
+
         pub proof fn insert(tracked &mut self, m: Map<K, V>) -> (tracked result: MapFrac<K, V>)
             requires
                 old(self).inv(),
@@ -264,6 +274,15 @@ verus! {
         pub proof fn dummy() -> (tracked result: MapFrac<K, V>)
         {
             let tracked r = Resource::alloc(MapView::unit());
+            MapFrac{ r }
+        }
+
+        pub proof fn empty(id: int) -> (tracked result: MapFrac<K, V>)
+            ensures
+                result.valid(id),
+                result@ == Map::<K, V>::empty(),
+        {
+            let tracked r = Resource::create_unit(id);
             MapFrac{ r }
         }
 

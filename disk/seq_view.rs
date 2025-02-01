@@ -4,24 +4,24 @@ use super::seq_helper::*;
 
 verus! {
     pub struct SeqAuth<V> {
-        ghost len: nat,
-        auth: MapAuth<int, V>,
+        pub ghost len: nat,
+        pub auth: MapAuth<int, V>,
     }
 
     pub struct SeqFrac<V> {
-        ghost off: nat,
-        ghost len: nat,
-        frac: MapFrac<int, V>,
+        pub ghost off: nat,
+        pub ghost len: nat,
+        pub frac: MapFrac<int, V>,
     }
 
     impl<V> SeqAuth<V> {
-        pub closed spec fn inv(self) -> bool
+        pub open spec fn inv(self) -> bool
         {
             &&& self.auth.inv()
             &&& self.auth@.dom() =~= Set::new(|i: int| 0 <= i < self.len)
         }
 
-        pub closed spec fn id(self) -> int
+        pub open spec fn id(self) -> int
         {
             self.auth.id()
         }
@@ -32,7 +32,7 @@ verus! {
             &&& self.id() == id
         }
 
-        pub closed spec fn view(self) -> Seq<V>
+        pub open spec fn view(self) -> Seq<V>
         {
             Seq::new(self.len, |i: int| self.auth@[i])
         }
@@ -66,23 +66,23 @@ verus! {
             &&& self.inv()
         }
 
-        pub closed spec fn inv(self) -> bool
+        pub open spec fn inv(self) -> bool
         {
             &&& self.frac.inv()
             &&& self.frac@.dom() =~= Set::new(|i: int| self.off <= i < self.off + self.len)
         }
 
-        pub closed spec fn view(self) -> Seq<V>
+        pub open spec fn view(self) -> Seq<V>
         {
             Seq::new(self.len, |i: int| self.frac@[self.off + i])
         }
 
-        pub closed spec fn off(self) -> nat
+        pub open spec fn off(self) -> nat
         {
             self.off
         }
 
-        pub closed spec fn id(self) -> int
+        pub open spec fn id(self) -> int
         {
             self.frac.id()
         }

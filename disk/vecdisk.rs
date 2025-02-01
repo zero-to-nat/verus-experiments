@@ -19,15 +19,6 @@ verus! {
         }
     }
 
-    pub open spec fn can_result_from_write_map(post: Seq<u8>, pre: Seq<u8>, writeset: Map<usize, u8>) -> bool
-    {
-        &&& post.len() == pre.len()
-        &&& forall |i| 0 <= i < pre.len() ==> {
-            ||| post[i] == pre[i]
-            ||| writeset.contains_key(i as usize) && post[i] == writeset[i as usize]
-        }
-    }
-
     #[verifier::external_body]
     pub fn copy_from_slice(bytes: &[u8]) -> (out: Vec<u8>)
         ensures
@@ -41,32 +32,34 @@ verus! {
 
     pub struct WriteSet {
         pub writeset: HashMap<usize, u8>,
+        pub disklen: Ghost<usize>,
     }
 
     impl WriteSet {
         pub open spec fn valid(self, disklen: nat) -> bool {
-            forall |i: usize| self.writeset@.contains_key(i) ==> i < disklen
+            &&& self.disklen@ == disklen
+            &&& forall |i: usize| self.writeset@.contains_key(i) ==> i < self.disklen as nat
         }
 
         pub open spec fn view(self) -> Map<usize, u8> {
             self.writeset@
         }
 
-        pub fn write(self: &mut Self, a: usize, v: &[u8], Ghost(disklen): Ghost<usize>)
+        pub fn write(self: &mut Self, a: usize, v: &[u8])
             requires
-                old(self).valid(disklen as nat),
-                v@.len() > 0 ==> a + v@.len() <= disklen,
+                old(self).valid(old(self).disklen@ as nat),
+                v@.len() > 0 ==> a + v@.len() <= old(self).disklen@,
             ensures
-                self.valid(disklen as nat),
+                self.valid(old(self).disklen as nat),
                 self@ =~= old(self)@.union_prefer_right(seq_to_map(v@, a)),
         {
             broadcast use vstd::map::group_map_axioms;
 
             for i in 0..v.len()
                 invariant
-                    old(self).valid(disklen as nat),
-                    self.valid(disklen as nat),
-                    v@.len() > 0 ==> a + v@.len() <= disklen,
+                    old(self).valid(self.disklen as nat),
+                    self.valid(self.disklen as nat),
+                    v@.len() > 0 ==> a + v@.len() <= self.disklen@,
                     self.view() =~= old(self)@.union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
             {
                 let ghost tv = self@;
@@ -205,6 +198,7 @@ verus! {
         {
             WriteSet{
                 writeset: HashMap::new(),
+                disklen: Ghost(self.disklen()),
             }
         }
 
@@ -216,16 +210,13 @@ verus! {
             ensures
                 self.inv(),
                 self@ == update_seq_map(old(self)@, ws@),
-                can_result_from_write_map(self.persist(), old(self).persist(), ws@),
+                self.persist() == update_seq_map(old(self).persist(), ws@),
         {
             for (&a, &v) in ws.writeset.iter() {
                 self.store.set(a, v);
 
                 proof {
-                    let persist_prophecy: bool = arbitrary();
-                    if persist_prophecy {
-                        *self.persist.borrow_mut() = self.persist@.update(a as int, v);
-                    }
+                    *self.persist.borrow_mut() = self.persist@.update(a as int, v);
                 }
             }
 

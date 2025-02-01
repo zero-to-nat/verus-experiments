@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 use super::vecdisk::*;
 use super::seq_view::*;
+use super::map_view::*;
 use super::logatom::*;
 use super::seq_helper::*;
 
@@ -8,6 +9,14 @@ verus! {
     pub struct DiskResources {
         pub latest: SeqAuth<u8>,
         pub persist: SeqAuth<u8>,
+    }
+
+    pub struct WriteSetWrap {
+        ws: WriteSet,
+        auth: Tracked<MapAuth<int, u8>>,
+
+        // should really use logatom here..
+        disk_latest_frac: Tracked<MapFrac<int, u8>>,
     }
 
     pub struct DiskWrap {
@@ -193,6 +202,77 @@ verus! {
                 }),
             };
             (dw, Tracked(fr), Tracked(pfr))
+        }
+
+        pub fn begin(&self) -> (result: WriteSetWrap)
+            requires
+                self.inv(),
+            ensures
+                result.inv(),
+        {
+            let ws = self.d.begin();
+            let tracked (ar, fr) = MapAuth::new(Map::empty());
+            let tracked latest_frac = self.r.borrow().latest.auth.empty();
+
+            WriteSetWrap{
+                ws: ws,
+                auth: Tracked(ar),
+                disk_latest_frac: Tracked(latest_frac),
+            }
+        }
+    }
+
+    impl WriteSetWrap {
+        pub closed spec fn inv(self) -> bool {
+            &&& self.auth@.inv()
+            &&& self.ws.valid(self.ws.disklen@ as nat)
+            &&& self.auth@@.dom() == self.disk_latest_frac@@.dom()
+            &&& self.disk_latest_frac@.inv()
+        }
+
+        pub closed spec fn id(self) -> int {
+            self.auth@.id()
+        }
+
+        pub closed spec fn latest_id(self) -> int {
+            self.disk_latest_frac@.id()
+        }
+
+        pub fn write(self: &mut Self, a: usize, v: &[u8], Tracked(latest): Tracked<SeqFrac<u8>>) -> (result: Tracked<SeqFrac<u8>>)
+            requires
+                old(self).inv(),
+                latest.valid(old(self).latest_id()),
+                latest.off() == a,
+                latest@.len() == v@.len(),
+            ensures
+                self.inv(),
+                self.latest_id() == old(self).latest_id(),
+                self.id() == old(self).id(),
+                result@.valid(self.id()),
+                result@.off() == a,
+                result@@ =~= v@,
+        {
+            // XXX need to validate latest against disk's auth and the disk.inv() that says
+            // all elements are in-bounds, to satisfy self.ws.write()'s requires.
+            assume(false);
+
+            self.ws.write(a, v);
+
+            let ghost vmap = seq_to_map(v@, a as int);
+            assert(vmap.dom() == Set::new(|i: int| a as int <= i < a + v@.len()));
+
+            proof {
+                self.disk_latest_frac.borrow_mut().disjoint(&latest.frac);
+            }
+
+            let tracked mf = self.auth.borrow_mut().insert(vmap);
+            assert(mf@ == vmap);
+
+            proof {
+                self.disk_latest_frac.borrow_mut().combine(latest.frac);
+            }
+
+            Tracked(SeqFrac::new(a as nat, v@.len(), mf))
         }
     }
 }
