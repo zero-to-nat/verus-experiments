@@ -65,6 +65,8 @@ verus! {
                 });
             r.split(1)
         }
+
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     pub struct WriteFupd1
@@ -105,6 +107,8 @@ verus! {
                 });
             r.split(1)
         }
+
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     fn main()

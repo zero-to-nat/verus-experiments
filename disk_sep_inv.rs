@@ -102,7 +102,7 @@ verus! {
 
         proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
             let tracked mut mself = self;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
 
                 if op.addr == a_addr {
@@ -183,7 +183,7 @@ verus! {
 
         proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
             let tracked mut mself = self;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.combine(inner.ptr_state);
                 mself.preparing_frac.agree(&r.latest);
                 inner.a.agree(&r.persist);
@@ -252,7 +252,7 @@ verus! {
 
         proof fn apply(tracked self, op: WriteOp, pstate: Seq<u8>, tracked r: &mut DiskResources, e: &()) -> (tracked result: Self::ApplyResult) {
             let tracked mut mself = self;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 mself.ptr_state_frac.agree(&inner.ptr_state);
                 inner.ptr.agree(&r.persist);
                 inner.ptr.update(&mut r.persist, pstate);
@@ -321,7 +321,7 @@ verus! {
         proof fn apply(tracked self, op: FlushOp, tracked r: &DiskResources, e: &()) -> (tracked result: Frac<PtrState>) {
             let tracked mut mself = self;
             mself.ptr_latest.agree(&r.latest);
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 inner.ptr.agree(&r.persist);
 
                 mself.ptr_state_frac.combine(inner.ptr_state);
