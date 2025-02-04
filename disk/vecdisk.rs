@@ -8,6 +8,7 @@ verus! {
     pub struct Disk {
         store: Vec<u8>,
         persist: Ghost<Seq<u8>>,
+        writeset: HashMap<usize, u8>,
     }
 
     pub open spec fn can_result_from_write(post: Seq<u8>, pre: Seq<u8>, addr: int, bytes: Seq<u8>) -> bool
@@ -30,69 +31,21 @@ verus! {
         buffer
     }
 
-    pub struct WriteSet {
-        pub writeset: HashMap<usize, u8>,
-        pub disklen: Ghost<usize>,
-    }
-
-    impl WriteSet {
-        pub open spec fn valid(self, disklen: nat) -> bool {
-            &&& self.disklen@ == disklen
-            &&& forall |i: usize| self.writeset@.contains_key(i) ==> i < self.disklen as nat
-        }
-
-        pub open spec fn view(self) -> Map<usize, u8> {
-            self.writeset@
-        }
-
-        pub fn write(self: &mut Self, a: usize, v: &[u8])
-            requires
-                old(self).valid(old(self).disklen@ as nat),
-                v@.len() > 0 ==> a + v@.len() <= old(self).disklen@,
-            ensures
-                self.valid(old(self).disklen as nat),
-                self@ =~= old(self)@.union_prefer_right(seq_to_map(v@, a)),
-        {
-            broadcast use vstd::map::group_map_axioms;
-
-            for i in 0..v.len()
-                invariant
-                    old(self).valid(self.disklen as nat),
-                    self.valid(self.disklen as nat),
-                    v@.len() > 0 ==> a + v@.len() <= self.disklen@,
-                    self.view() =~= old(self)@.union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
-            {
-                let ghost tv = self@;
-                assert(self@ =~= tv);
-                assert forall |j| self.writeset@.contains_key(j as usize) implies self.writeset@[j as usize] == tv[j] by {}
-
-                let ghost w = self.writeset@;
-                self.writeset.insert(a+i, v[i]);
-                let ghost y = self.writeset@;
-                assert(y == w.insert((a+i) as usize, v[i as int]));
-
-                assert forall |j: int| #[trigger] y.contains_key(j as usize) && j as usize != (a+i) as usize implies y[j as usize] == w[j as usize] by {
-                    vstd::map::axiom_map_insert_different(w, (a+i) as usize, j as usize, v[i as int]);
-                }
-
-                assert forall |j| self.writeset@.contains_key(j as usize) && j != a+i implies self.writeset@[j as usize] == tv[j] by {}
-                assert(self.writeset@.contains_key((a+i) as usize));
-                assert(self.writeset@[(a+i) as usize] == v[i as int]);
-                assert(self@[(a+i) as usize] == v[i as int]);
-                assert(self@ =~= tv.insert((a+i) as usize, v[i as int]));
-            }
-        }
-    }
-
     impl Disk {
         pub closed spec fn inv(self) -> bool
         {
-            self.persist@.len() == self.store@.len()
+            &&& self.persist@.len() == self.store@.len()
+            &&& forall |i: usize| self.writeset@.contains_key(i) ==> i < self.store@.len()
         }
 
         pub closed spec fn view(self) -> Seq<u8>
         {
             self.store@
+        }
+
+        pub closed spec fn writeset(self) -> Map<usize, u8>
+        {
+            self.writeset@
         }
 
         pub closed spec fn persist(self) -> Seq<u8>
@@ -186,39 +139,68 @@ verus! {
             Disk{
                 store: store,
                 persist: Ghost(store@),
+                writeset: HashMap::new(),
             }
         }
 
-        pub fn begin(&self) -> (result: WriteSet)
+        pub fn reset(self: &mut Self)
             requires
-                self.inv(),
+                old(self).inv(),
             ensures
-                result.valid(self@.len()),
-                result.writeset.len() == 0,
+                self.inv(),
+                self@ == old(self)@,
+                self.persist() == old(self).persist(),
+                self.writeset() == Map::<usize, u8>::empty(),
         {
-            WriteSet{
-                writeset: HashMap::new(),
-                disklen: Ghost(self.disklen()),
+            self.writeset = HashMap::new();
+        }
+
+        pub fn write_txn(self: &mut Self, a: usize, v: &[u8])
+            requires
+                old(self).inv(),
+                v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
+            ensures
+                self.inv(),
+                self@ == old(self)@,
+                self.writeset() =~= old(self).writeset().union_prefer_right(seq_to_map(v@, a)),
+        {
+            broadcast use vstd::map::group_map_axioms;
+
+            for i in 0..v.len()
+                invariant
+                    self.inv(),
+                    self@ == old(self)@,
+                    v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
+                    self.writeset() =~= old(self).writeset().union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
+            {
+                proof {
+                    // Prove that self@.len() is at most usize, which means no overflows.
+                    vstd::std_specs::vec::axiom_spec_len(&self.store);
+                }
+
+                self.writeset.insert(a+i, v[i]);
             }
         }
 
         #[verifier::external_body]
-        pub fn commit(&mut self, ws: WriteSet)
+        pub fn commit(&mut self)
             requires
                 old(self).inv(),
-                ws.valid(old(self)@.len()),
             ensures
                 self.inv(),
-                self@ == update_seq_map(old(self)@, ws@),
-                self.persist() == update_seq_map(old(self).persist(), ws@),
+                self@ == update_seq_map(old(self)@, old(self).writeset()),
+                self.persist() == update_seq_map(old(self).persist(), old(self).writeset()),
+                self.writeset() == Map::<usize, u8>::empty(),
         {
-            for (&a, &v) in ws.writeset.iter() {
+            for (&a, &v) in self.writeset.iter() {
                 self.store.set(a, v);
 
                 proof {
                     *self.persist.borrow_mut() = self.persist@.update(a as int, v);
                 }
             }
+
+            self.writeset = HashMap::new();
 
             // XXX prove later
         }

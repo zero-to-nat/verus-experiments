@@ -11,17 +11,13 @@ verus! {
         pub persist: SeqAuth<u8>,
     }
 
-    pub struct WriteSetWrap {
-        ws: WriteSet,
-        auth: Tracked<MapAuth<int, u8>>,
-
-        // should really use logatom here..
-        disk_latest_frac: Tracked<MapFrac<int, u8>>,
-    }
-
     pub struct DiskWrap {
         d: Disk,
         r: Tracked<DiskResources>,
+
+        // For the transactional writeset.
+        writeset_auth: Tracked<MapAuth<int, u8>>,
+        writeset_latest_frac: Tracked<MapFrac<int, u8>>,    // should switch to logatom
     }
 
     pub struct WriteOp {
@@ -109,6 +105,10 @@ verus! {
             &&& self.r@.latest@ =~= self.d@
             &&& self.r@.persist@ =~= self.d.persist()
             &&& self.r@.latest@.len() == self.r@.persist@.len()
+
+            &&& self.writeset_auth@.inv()
+            &&& self.writeset_auth@@.dom() == self.writeset_latest_frac@@.dom()
+            &&& self.writeset_latest_frac@.valid(self.r@.latest.id())
         }
 
         pub closed spec fn id(self) -> int
@@ -119,6 +119,11 @@ verus! {
         pub closed spec fn persist_id(self) -> int
         {
             self.r@.persist.id()
+        }
+
+        pub closed spec fn writeset_id(self) -> int
+        {
+            self.writeset_auth@.id()
         }
 
         pub fn read<Lin>(&self, a: usize, len: usize,
@@ -194,82 +199,73 @@ verus! {
         {
             let tracked (ar, fr) = SeqAuth::<u8>::new(d@);
             let tracked (par, pfr) = SeqAuth::<u8>::new(d.persist());
+
+            let tracked (writeset_ar, writeset_fr) = MapAuth::new(Map::empty());
+            let tracked writeset_latest_frac = ar.auth.empty();
+
             let dw = DiskWrap{
                 d: d,
                 r: Tracked(DiskResources{
                     latest: ar,
                     persist: par,
                 }),
+
+                writeset_auth: Tracked(writeset_ar),
+                writeset_latest_frac: Tracked(writeset_latest_frac),
             };
             (dw, Tracked(fr), Tracked(pfr))
         }
 
-        pub fn begin(&self) -> (result: WriteSetWrap)
+        pub fn reset(&mut self) -> (writeset_id: Ghost<int>)
             requires
-                self.inv(),
+                old(self).inv(),
             ensures
-                result.inv(),
+                self.inv(),
+                self.writeset_id() == writeset_id@,
         {
-            let ws = self.d.begin();
+            let ws = self.d.reset();
             let tracked (ar, fr) = MapAuth::new(Map::empty());
             let tracked latest_frac = self.r.borrow().latest.auth.empty();
 
-            WriteSetWrap{
-                ws: ws,
-                auth: Tracked(ar),
-                disk_latest_frac: Tracked(latest_frac),
-            }
-        }
-    }
+            self.writeset_auth = Tracked(ar);
+            self.writeset_latest_frac = Tracked(latest_frac);
 
-    impl WriteSetWrap {
-        pub closed spec fn inv(self) -> bool {
-            &&& self.auth@.inv()
-            &&& self.ws.valid(self.ws.disklen@ as nat)
-            &&& self.auth@@.dom() == self.disk_latest_frac@@.dom()
-            &&& self.disk_latest_frac@.inv()
+            Ghost(self.writeset_auth@.id())
         }
 
-        pub closed spec fn id(self) -> int {
-            self.auth@.id()
-        }
-
-        pub closed spec fn latest_id(self) -> int {
-            self.disk_latest_frac@.id()
-        }
-
-        pub fn write(self: &mut Self, a: usize, v: &[u8], Tracked(latest): Tracked<SeqFrac<u8>>) -> (result: Tracked<SeqFrac<u8>>)
+        pub fn write_txn(self: &mut Self, a: usize, v: &[u8], Tracked(latest): Tracked<SeqFrac<u8>>) -> (result: Tracked<SeqFrac<u8>>)
             requires
                 old(self).inv(),
-                latest.valid(old(self).latest_id()),
+                latest.valid(old(self).id()),
                 latest.off() == a,
                 latest@.len() == v@.len(),
             ensures
                 self.inv(),
-                self.latest_id() == old(self).latest_id(),
                 self.id() == old(self).id(),
-                result@.valid(self.id()),
+                self.persist_id() == old(self).persist_id(),
+                self.writeset_id() == old(self).writeset_id(),
+                result@.valid(self.writeset_id()),
                 result@.off() == a,
                 result@@ =~= v@,
         {
             // XXX need to validate latest against disk's auth and the disk.inv() that says
-            // all elements are in-bounds, to satisfy self.ws.write()'s requires.
+            // all elements are in-bounds, to satisfy self.d.write_txn()'s requires.
             assume(false);
 
-            self.ws.write(a, v);
+            self.d.write_txn(a, v);
 
             let ghost vmap = seq_to_map(v@, a as int);
             assert(vmap.dom() == Set::new(|i: int| a as int <= i < a + v@.len()));
 
             proof {
-                self.disk_latest_frac.borrow_mut().disjoint(&latest.frac);
+                self.writeset_latest_frac.borrow_mut().disjoint(&latest.frac);
             }
 
-            let tracked mf = self.auth.borrow_mut().insert(vmap);
+            let tracked mf = self.writeset_auth.borrow_mut().insert(vmap);
             assert(mf@ == vmap);
 
             proof {
-                self.disk_latest_frac.borrow_mut().combine(latest.frac);
+                self.writeset_latest_frac.borrow_mut().combine(latest.frac);
             }
 
             Tracked(SeqFrac::new(a as nat, v@.len(), mf))
