@@ -80,7 +80,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& op.id == self.inv.constant().disk_id
@@ -156,7 +156,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskBarrierOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
@@ -205,7 +205,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskReadOp) -> bool {
             &&& self.inv.constant().disk_id == op.id

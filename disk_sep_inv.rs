@@ -76,9 +76,7 @@ verus! {
     impl<'a> MutLinearizer<WriteOp> for InactiveWriter<'a> {
         type ApplyResult = SeqFrac<u8>;
 
-        closed spec fn namespace(self) -> int {
-            self.inv.namespace()
-        }
+        closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: WriteOp) -> bool {
             &&& self.latest_frac.valid(op.id)
@@ -154,9 +152,7 @@ verus! {
     impl<'a> ReadLinearizer<FlushOp> for PreparingFlush<'a> {
         type ApplyResult = Frac<PtrState>;
 
-        closed spec fn namespace(self) -> int {
-            self.inv.namespace()
-        }
+        closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: FlushOp) -> bool {
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)
@@ -225,9 +221,7 @@ verus! {
     impl MutLinearizer<WriteOp> for CommittingWriter {
         type ApplyResult = (SeqFrac<u8>, Frac<PtrState>);
 
-        closed spec fn namespace(self) -> int {
-            self.inv.namespace()
-        }
+        closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: WriteOp) -> bool {
             &&& self.latest_frac.valid(op.id)
@@ -298,9 +292,7 @@ verus! {
     impl<'a> ReadLinearizer<FlushOp> for CommittingFlush<'a> {
         type ApplyResult = Frac<PtrState>;
 
-        closed spec fn namespace(self) -> int {
-            self.inv.namespace()
-        }
+        closed spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: FlushOp) -> bool {
             &&& self.ptr_state_frac.valid(self.inv.constant().ptr_state_id, 1)

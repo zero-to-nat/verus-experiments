@@ -30,8 +30,8 @@ verus! {
     pub trait ReadLinearizer<Op: ReadOperation> : Sized {
         type ApplyResult /* = () */;
 
-        open spec fn namespace(self) -> int {
-            0
+        open spec fn namespaces(self) -> Set<int> {
+            Set::empty()
         }
 
         open spec fn pre(self, op: Op) -> bool {
@@ -49,7 +49,7 @@ verus! {
             ensures
                 self.post(op, *e, out),
             opens_invariants
-                [ self.namespace() ];
+                { self.namespaces() };
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -58,14 +58,14 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                [ self.namespace() ];
+                { self.namespaces() };
     }
 
     pub trait MutLinearizer<Op: MutOperation> : Sized {
         type ApplyResult /* = () */;
 
-        open spec fn namespace(self) -> int {
-            0
+        open spec fn namespaces(self) -> Set<int> {
+            Set::empty()
         }
 
         open spec fn pre(self, op: Op) -> bool {
@@ -84,7 +84,7 @@ verus! {
                 op.ensures(hint, *old(r), *r),
                 self.post(op, *e, out),
             opens_invariants
-                [ self.namespace() ];
+                { self.namespaces() };
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -93,6 +93,6 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                [ self.namespace() ];
+                { self.namespaces() };
     }
 }
