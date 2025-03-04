@@ -62,9 +62,9 @@ impl<'a> GenericSingleInvReadCallBack<ShardedBankGetSemantics> for ShardedBankGe
     }
 }
 
-pub struct ShardedBankSetSemantics {}
+pub struct ShardedBankDepositSemantics {}
 
-impl CallBackSemantics for ShardedBankSetSemantics {
+impl CallBackSemantics for ShardedBankDepositSemantics {
     type Param = FractionalResource<Option::<u32>, 2>;
     type GhostResult = FractionalResource<Option::<u32>, 2>;
     type ExecResult = u32;
@@ -80,11 +80,11 @@ impl CallBackSemantics for ShardedBankSetSemantics {
     }
 }
 
-struct ShardedBankSetCB {
+struct ShardedBankDepositCB {
     pub rsrc: FractionalResource<Option::<u32>, 2>,
 }
 
-impl GenericSingleInvCallBack<ShardedBankSetSemantics> for ShardedBankSetCB {
+impl GenericSingleInvCallBack<ShardedBankDepositSemantics> for ShardedBankDepositCB {
     type CBResult = FractionalResource<Option::<u32>, 2>;
     
     open spec fn inv(&self) -> bool
@@ -119,8 +119,10 @@ impl GenericSingleInvCallBack<ShardedBankSetSemantics> for ShardedBankSetCB {
 }
 
 struct ShardedBankState<Store: KVStore<u32, u32>> {
-    phy: Store,
-    down_frac_map: Tracked<Map<u32, FractionalResource<Option::<u32>, 2>>>,
+    left_store: Store,
+    left_down_frac_map: Tracked<Map<u32, FractionalResource<Option::<u32>, 2>>>,
+    right_store: Store,
+    right_down_frac_map: Tracked<Map<u32, FractionalResource<Option::<u32>, 2>>>,
     up_frac_map: Tracked<Map<u32, FractionalResource<Option::<u32>, 2>>>,
 }
 
@@ -132,17 +134,22 @@ impl<Store: KVStore<u32, u32>> RwLockPredicate<ShardedBankState<Store>> for Shar
     closed spec fn inv(self, v: ShardedBankState<Store>) -> bool {
         &&& forall |k: u32|
             #![trigger self.ids.contains_key(k)]
-            #![trigger v.down_frac_map@.contains_key(k)]
+            #![trigger v.left_down_frac_map@.contains_key(k)]
+            #![trigger v.right_down_frac_map@.contains_key(k)]
             #![trigger v.up_frac_map@.contains_key(k)]
             0 <= k <= u32::MAX ==> 
         {
-            &&& #[trigger] self.ids.contains_key(k)
-            &&& v.phy.ids().contains_key(k)
-            &&& v.down_frac_map@.contains_key(k)
-            &&& v.down_frac_map@[k].valid(v.phy.ids()[k], 1)
+            &&& self.ids.contains_key(k)
+            &&& v.left_store.ids().contains_key(k)
+            &&& v.left_down_frac_map@.contains_key(k)
+            &&& v.left_down_frac_map@[k].valid(v.left_store.ids()[k], 1)
+            &&& v.right_store.ids().contains_key(k)
+            &&& v.right_down_frac_map@.contains_key(k)
+            &&& v.right_down_frac_map@[k].valid(v.right_store.ids()[k], 1)
             &&& v.up_frac_map@.contains_key(k)
             &&& v.up_frac_map@[k].valid(self.ids[k], 1)
-            &&& v.down_frac_map@[k].val() == v.up_frac_map@[k].val()
+            &&& ShardedBank::<Store>::unwrap_or_zero(v.left_down_frac_map@[k].val()) + ShardedBank::<Store>::unwrap_or_zero(v.right_down_frac_map@[k].val()) <= u32::MAX
+            &&& ShardedBank::<Store>::sum_option_spec(v.left_down_frac_map@[k].val(), v.right_down_frac_map@[k].val(), v.up_frac_map@[k].val())
         }
     }
 }
@@ -157,9 +164,53 @@ impl<Store: KVStore<u32, u32>> ShardedBank<Store> {
         self.locked_state.pred().ids
     }
 
-    proof fn new_frac() -> (tracked out: FractionalResource<Option::<u32>, 2>) {
-        let tracked frac = FractionalResource::new(None::<u32>);
-        frac
+    pub open spec fn unwrap_or_zero(val: Option::<u32>) -> u32
+    {
+        match val {
+            None => 0,
+            Some(v) => v
+        }
+    }
+
+    pub open spec fn sum_option_spec(v1: Option::<u32>, v2: Option::<u32>, sum: Option<u32>) -> bool
+    {
+        match (v1, v2) {
+            (None, None) => sum.is_none(),
+            (Some(v), None) => sum.is_some() && sum.unwrap() == v,
+            (None, Some(v)) => sum.is_some() && sum.unwrap() == v,
+            (Some(v1), Some(v2)) => sum.is_some() && sum.unwrap() == v1 + v2
+        }
+    }
+
+    pub fn sum_option(v1: Option::<u32>, v2: Option::<u32>) -> (out: Option::<u32>)
+        requires Self::unwrap_or_zero(v1) + Self::unwrap_or_zero(v2) <= u32::MAX
+        ensures Self::sum_option_spec(v1, v2, out)
+    {
+        match (v1, v2) {
+            (None, None) => None,
+            (Some(v), None) => Some(v),
+            (None, Some(v)) => Some(v),
+            (Some(v1), Some(v2)) => Some(v1 + v2)
+        }
+    }
+
+    proof fn compute_new_total(old_total: Option<u32>, old_shard1: Option<u32>, new_shard1: u32, shard2: Option<u32>) -> (new_total: u32)
+        requires 
+            Self::sum_option_spec(old_shard1, shard2, old_total),
+            Self::unwrap_or_zero(old_total) - Self::unwrap_or_zero(old_shard1) + new_shard1 <= u32::MAX
+        ensures 
+            Self::sum_option_spec(Some(new_shard1), shard2, Some(new_total)),
+    {
+        let mut new_total: int;
+        if (old_total.is_none()) {
+            assert(old_shard1.is_none());
+            assert(shard2.is_none());
+            new_total = new_shard1 as int;
+        } else {
+            assert(old_total.unwrap() >= Self::unwrap_or_zero(old_shard1));
+            new_total = old_total.unwrap() - Self::unwrap_or_zero(old_shard1) + new_shard1;
+        }
+        new_total as u32
     }
 
     fn new() -> (out: (Self, Tracked<Map<u32, FractionalResource<Option::<u32>, 2>>>))
@@ -170,7 +221,8 @@ impl<Store: KVStore<u32, u32>> ShardedBank<Store> {
                 &&& out.1@[k].val() == None::<u32>
             }
     {
-        let (phy, down_fracs) = Store::new();
+        let (left_store, left_down_fracs) = Store::new();
+        let (right_store, right_down_fracs) = Store::new();
 
         let tracked my_fracs = Map::<u32, FractionalResource<Option::<u32>, 2>>::tracked_empty();
         let tracked client_fracs = Map::<u32, FractionalResource<Option::<u32>, 2>>::tracked_empty();
@@ -209,7 +261,13 @@ impl<Store: KVStore<u32, u32>> ShardedBank<Store> {
             ids = ids.insert(u32::MAX, my_frac.id());
         }
 
-        let state = ShardedBankState { phy: phy, down_frac_map: down_fracs, up_frac_map: Tracked(my_fracs) };
+        let state = ShardedBankState { 
+            left_store: left_store, 
+            left_down_frac_map: left_down_fracs, 
+            right_store: right_store,
+            right_down_frac_map: right_down_fracs,
+            up_frac_map: Tracked(my_fracs) 
+        };
         let ghost pred = ShardedBankPred { ids: ids };
         let locked_state = RwLock::new(state, Ghost(pred));
 
@@ -227,37 +285,59 @@ impl<Store: KVStore<u32, u32>> ShardedBank<Store> {
         let read_handle = self.locked_state.acquire_read();
         let state = read_handle.borrow();
 
-        let tracked down_frac = state.down_frac_map.borrow().tracked_borrow(k);
-        let kv_cb: Tracked<KVStoreGetCB<u32>> = Tracked(KVStoreGetCB{rsrc: Tracked(down_frac)}); 
-        let (phy_result, _) = state.phy.get(k, kv_cb);
+        let tracked left_down_frac = state.left_down_frac_map.borrow().tracked_borrow(k);
+        let left_cb: Tracked<KVStoreGetCB<u32>> = Tracked(KVStoreGetCB{rsrc: Tracked(left_down_frac)}); 
+        let (left_phy_result, _) = state.left_store.get(k, left_cb);
+        let tracked right_down_frac = state.right_down_frac_map.borrow().tracked_borrow(k);
+        let right_cb: Tracked<KVStoreGetCB<u32>> = Tracked(KVStoreGetCB{rsrc: Tracked(right_down_frac)}); 
+        let (right_phy_result, _) = state.right_store.get(k, right_cb);
+
+        let total = Self::sum_option(left_phy_result, right_phy_result);
 
         let bank_cb: Tracked<ShardedBankGetCB> = Tracked(ShardedBankGetCB{rsrc: client_frac});
         let tracked up_frac = state.up_frac_map.borrow().tracked_borrow(k);
-        let tracked (_, _) = bank_cb.get().cb(&up_frac, &phy_result);
+        let tracked (_, _) = bank_cb.get().cb(&up_frac, &total);
 
         read_handle.release_read();
 
-        phy_result
+        total
     }
 
-    fn set(&self, k: u32, v: u32, client_frac: FractionalResource<Option::<u32>, 2>) 
+    fn deposit(&self, k: u32, v: u32, client_frac: FractionalResource<Option::<u32>, 2>) 
         -> (out: Tracked<FractionalResource<Option::<u32>, 2>>)
         requires
             self.ids().contains_key(k),
-            client_frac.valid(self.ids()[k], 1) 
+            client_frac.valid(self.ids()[k], 1),
+            Self::unwrap_or_zero(client_frac.val()) + v <= u32::MAX
         ensures 
-            out@.valid(self.ids()[k], 1)
+            out@.valid(self.ids()[k], 1),
+            out@.val().is_some(),
+            out@.val().unwrap() == Self::unwrap_or_zero(client_frac.val()) + v
     {   
         let (mut state, lock_handle) = self.locked_state.acquire_write();
 
-        let tracked down_frac = state.down_frac_map.borrow_mut().tracked_remove(k);
-        let cb: Tracked<KVStoreSetCB<u32>> = Tracked(KVStoreSetCB{rsrc: down_frac}); 
-        let Tracked(cbresult) = state.phy.set(k, v, cb);
-        let tracked _ = state.down_frac_map.borrow_mut().tracked_insert(k, cbresult); 
+        // first, read old value
+        let tracked down_frac = state.left_down_frac_map.borrow().tracked_borrow(k);
+        let get_cb: Tracked<KVStoreGetCB<u32>> = Tracked(KVStoreGetCB{rsrc: Tracked(down_frac)}); 
+        let (old_phy_result, _) = state.left_store.get(k, get_cb);
 
-        let bank_cb: Tracked<ShardedBankSetCB> = Tracked(ShardedBankSetCB{rsrc: client_frac});
+        // second, add deposit and write new value
         let tracked up_frac = state.up_frac_map.borrow_mut().tracked_remove(k);
-        let tracked (new_up_frac, new_client_frac) = bank_cb.get().cb(up_frac, &v);
+        proof {
+            client_frac.agree(&up_frac);
+        }
+        assert(Self::unwrap_or_zero(old_phy_result) <= Self::unwrap_or_zero(client_frac.val()));
+        let new_phy_result = Self::sum_option(old_phy_result, Some(v));
+        let tracked down_frac = state.left_down_frac_map.borrow_mut().tracked_remove(k);
+        let set_cb: Tracked<KVStoreSetCB<u32>> = Tracked(KVStoreSetCB{rsrc: down_frac}); 
+        let Tracked(cbresult) = state.left_store.set(k, new_phy_result.unwrap(), set_cb);
+        let tracked _ = state.left_down_frac_map.borrow_mut().tracked_insert(k, cbresult); 
+
+        // third, update bank's ghost resources
+        assert(Self::unwrap_or_zero(up_frac.val()) + v == Self::unwrap_or_zero(state.left_down_frac_map@[k].val()) + Self::unwrap_or_zero(state.right_down_frac_map@[k].val()));
+        let ghost new_total = (Self::unwrap_or_zero(up_frac.val()) + v) as u32;
+        let bank_cb: Tracked<ShardedBankDepositCB> = Tracked(ShardedBankDepositCB{rsrc: client_frac});
+        let tracked (new_up_frac, new_client_frac) = bank_cb.get().cb(up_frac, &new_total);
         proof {
             new_client_frac.agree(&new_up_frac);
         }
