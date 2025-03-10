@@ -80,7 +80,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& op.id == self.inv.constant().disk_id
@@ -111,7 +111,7 @@ verus! {
         {
             let tracked mut mself = self;
             let tracked mut ires;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 r.combine(inner.disk);
                 r.update(MemCrashView{
                         mem: view_write(r@.mem, op.addr, op.val),
@@ -140,6 +140,8 @@ verus! {
 
             ires
         }
+
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     pub struct InvBarrierPerm
@@ -154,7 +156,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskBarrierOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
@@ -176,7 +178,7 @@ verus! {
         proof fn apply(tracked self, op: DiskBarrierOp, tracked r: &Frac<MemCrashView>, er: &()) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 r.agree(&inner.disk);
                 mself.disk2_frac.agree(&inner.disk2);
                 mself.app_frac.agree(&inner.abs);
@@ -187,6 +189,8 @@ verus! {
                 app_frac: mself.app_frac,
             }
         }
+
+        proof fn peek(tracked &self, op: DiskBarrierOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     pub struct InvReadPerm
@@ -201,7 +205,7 @@ verus! {
     {
         type ApplyResult = InvPermResult;
 
-        open spec fn namespace(self) -> int { self.inv.namespace() }
+        open spec fn namespaces(self) -> Set<int> { set![self.inv.namespace()] }
 
         open spec fn pre(self, op: DiskReadOp) -> bool {
             &&& self.inv.constant().disk_id == op.id
@@ -223,7 +227,7 @@ verus! {
         proof fn apply(tracked self, op: DiskReadOp, tracked r: &Frac<MemCrashView>, v: &u8) -> (tracked result: InvPermResult)
         {
             let tracked mut mself = self;
-            open_atomic_invariant!(mself.credit => &mself.inv => inner => {
+            open_atomic_invariant_in_proof!(mself.credit => &mself.inv => inner => {
                 r.agree(&inner.disk);
                 mself.disk2_frac.agree(&inner.disk2);
                 mself.app_frac.agree(&inner.abs);
@@ -234,6 +238,8 @@ verus! {
                 app_frac: mself.app_frac,
             }
         }
+
+        proof fn peek(tracked &self, op: DiskReadOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     fn main()

@@ -112,6 +112,12 @@ verus! {
             self.r.loc()
         }
 
+        pub open spec fn valid(self, id: Loc) -> bool
+        {
+            &&& self.inv()
+            &&& self.id() == id
+        }
+
         pub closed spec fn view(self) -> Map<K, V>
         {
             self.r.value().auth.unwrap().unwrap()
@@ -134,7 +140,17 @@ verus! {
             r
         }
 
-        pub proof fn alloc(tracked &mut self, m: Map<K, V>) -> (tracked result: MapFrac<K, V>)
+        pub proof fn empty(tracked &self) -> (tracked result: MapFrac<K, V>)
+            requires
+                self.inv(),
+            ensures
+                result.valid(self.id()),
+                result@ == Map::<K, V>::empty(),
+        {
+            MapFrac::<K, V>::empty(self.id())
+        }
+
+        pub proof fn insert(tracked &mut self, m: Map<K, V>) -> (tracked result: MapFrac<K, V>)
             requires
                 old(self).inv(),
                 old(self)@.dom().disjoint(m.dom()),
@@ -173,6 +189,34 @@ verus! {
             let tracked (ar, fr) = r_upd.split(arr, frr);
             self.r = ar;
             MapFrac { r: fr }
+        }
+
+        pub proof fn delete(tracked &mut self, tracked f: MapFrac<K, V>)
+            requires
+                old(self).inv(),
+                f.valid(old(self).id()),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                self@ == old(self)@.remove_keys(f@.dom()),
+        {
+            broadcast use lemma_submap_of_trans;
+            broadcast use lemma_op_frac_submap_of;
+
+            let tracked mut r = Resource::alloc(MapView::<K, V>::unit());
+            tracked_swap(&mut self.r, &mut r);
+
+            r = r.join(f.r);
+
+            let ra = r.value().auth.unwrap().unwrap();
+            let ra_new = ra.remove_keys(f@.dom());
+
+            let rnew = MapView {
+                auth: Some(Some(ra_new)),
+                frac: Some(Map::empty()),
+            };
+
+            self.r = r.update(rnew);
         }
 
         pub proof fn new(m: Map<K, V>) -> (tracked result: (MapAuth<K, V>, MapFrac<K, V>))
@@ -233,6 +277,15 @@ verus! {
             MapFrac{ r }
         }
 
+        pub proof fn empty(id: int) -> (tracked result: MapFrac<K, V>)
+            ensures
+                result.valid(id),
+                result@ == Map::<K, V>::empty(),
+        {
+            let tracked r = Resource::create_unit(id);
+            MapFrac{ r }
+        }
+
         pub proof fn take(tracked &mut self) -> (tracked result: MapFrac<K, V>)
             requires
                 old(self).inv(),
@@ -268,11 +321,26 @@ verus! {
                 self.inv(),
                 self.id() == old(self).id(),
                 self@ == old(self)@.union_prefer_right(other@),
+                old(self)@.dom().disjoint(other@.dom()),
         {
             let tracked mut r = Resource::alloc(MapView::unit());
             tracked_swap(&mut self.r, &mut r);
             r.validate_2(&other.r);
             self.r = r.join(other.r);
+        }
+
+        pub proof fn disjoint(tracked &mut self, tracked other: &MapFrac<K, V>)
+            requires
+                old(self).inv(),
+                other.inv(),
+                old(self).id() == other.id(),
+            ensures
+                self.inv(),
+                self.id() == old(self).id(),
+                self@ == old(self)@,
+                self@.dom().disjoint(other@.dom()),
+        {
+            self.r.validate_2(&other.r);
         }
 
         pub proof fn split(tracked &mut self, s: Set<K>) -> (tracked result: MapFrac<K, V>)

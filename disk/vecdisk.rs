@@ -1,4 +1,6 @@
 use vstd::prelude::*;
+use super::seq_helper::*;
+use std::collections::HashMap;
 
 verus! {
     broadcast use vstd::std_specs::hash::group_hash_axioms;
@@ -6,11 +8,7 @@ verus! {
     pub struct Disk {
         store: Vec<u8>,
         persist: Ghost<Seq<u8>>,
-    }
-
-    pub open spec fn update_bytes(s: Seq<u8>, addr: int, bytes: Seq<u8>) -> Seq<u8>
-    {
-        Seq::new(s.len(), |i: int| if addr <= i < addr + bytes.len() { bytes[i - addr] } else { s[i] })
+        writeset: HashMap<usize, u8>,
     }
 
     pub open spec fn can_result_from_write(post: Seq<u8>, pre: Seq<u8>, addr: int, bytes: Seq<u8>) -> bool
@@ -34,19 +32,33 @@ verus! {
     }
 
     impl Disk {
-        pub closed spec fn inv(&self) -> bool
+        pub closed spec fn inv(self) -> bool
         {
-            self.persist@.len() == self.store@.len()
+            &&& self.persist@.len() == self.store@.len()
+            &&& forall |i: usize| self.writeset@.contains_key(i) ==> i < self.store@.len()
         }
 
-        pub closed spec fn view(&self) -> Seq<u8>
+        pub closed spec fn view(self) -> Seq<u8>
         {
             self.store@
         }
 
-        pub closed spec fn persist(&self) -> Seq<u8>
+        pub closed spec fn writeset(self) -> Map<usize, u8>
+        {
+            self.writeset@
+        }
+
+        pub closed spec fn persist(self) -> Seq<u8>
         {
             self.persist@
+        }
+
+        pub proof fn disklen(self) -> (result: usize)
+            ensures
+                result == self@.len(),
+        {
+            vstd::std_specs::vec::axiom_spec_len(&self.store);
+            self@.len() as usize
         }
 
         pub fn read_one(&self, a: usize) -> (result: u8)
@@ -85,7 +97,7 @@ verus! {
                 self.inv(),
                 len > 0 ==> a + len <= self@.len(),
             ensures
-                result@ == self@.subrange(a as int, a + len as nat),
+                result@ == if len > 0 { self@.subrange(a as int, a + len as nat) } else { Seq::empty() },
         {
             copy_from_slice(&self.store[a..a+len])
         }
@@ -97,7 +109,7 @@ verus! {
                 v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
             ensures
                 self.inv(),
-                self@ == update_bytes(old(self)@, a as int, v@),
+                self@ == update_seq(old(self)@, a as int, v@),
                 can_result_from_write(self.persist(), old(self).persist(), a as int, v@),
         {
             self.store.splice(a..a+v.len(), v.iter().cloned());
@@ -127,7 +139,70 @@ verus! {
             Disk{
                 store: store,
                 persist: Ghost(store@),
+                writeset: HashMap::new(),
             }
+        }
+
+        pub fn reset(self: &mut Self)
+            requires
+                old(self).inv(),
+            ensures
+                self.inv(),
+                self@ == old(self)@,
+                self.persist() == old(self).persist(),
+                self.writeset() == Map::<usize, u8>::empty(),
+        {
+            self.writeset = HashMap::new();
+        }
+
+        pub fn write_txn(self: &mut Self, a: usize, v: &[u8])
+            requires
+                old(self).inv(),
+                v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
+            ensures
+                self.inv(),
+                self@ == old(self)@,
+                self.writeset() =~= old(self).writeset().union_prefer_right(seq_to_map(v@, a)),
+        {
+            broadcast use vstd::map::group_map_axioms;
+
+            for i in 0..v.len()
+                invariant
+                    self.inv(),
+                    self@ == old(self)@,
+                    v@.len() > 0 ==> a + v@.len() <= old(self)@.len(),
+                    self.writeset() =~= old(self).writeset().union_prefer_right(seq_to_map(v@.subrange(0, i as int), a)),
+            {
+                proof {
+                    // Prove that self@.len() is at most usize, which means no overflows.
+                    vstd::std_specs::vec::axiom_spec_len(&self.store);
+                }
+
+                self.writeset.insert(a+i, v[i]);
+            }
+        }
+
+        #[verifier::external_body]
+        pub fn commit(&mut self)
+            requires
+                old(self).inv(),
+            ensures
+                self.inv(),
+                self@ == update_seq_map(old(self)@, old(self).writeset()),
+                self.persist() == update_seq_map(old(self).persist(), old(self).writeset()),
+                self.writeset() == Map::<usize, u8>::empty(),
+        {
+            for (&a, &v) in self.writeset.iter() {
+                self.store.set(a, v);
+
+                proof {
+                    *self.persist.borrow_mut() = self.persist@.update(a as int, v);
+                }
+            }
+
+            self.writeset = HashMap::new();
+
+            // XXX prove later
         }
     }
 }

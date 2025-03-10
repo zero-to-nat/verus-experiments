@@ -30,8 +30,6 @@ verus! {
     {
         type ApplyResult = Frac<MemCrashView>;
 
-        open spec fn namespace(self) -> int { 0 }
-
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)
             &&& if op.addr == 0 {
@@ -65,6 +63,8 @@ verus! {
                 });
             r.split(1)
         }
+
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     pub struct WriteFupd1
@@ -76,8 +76,6 @@ verus! {
     impl logatom::MutLinearizer<DiskWriteOp> for WriteFupd1
     {
         type ApplyResult = Frac<MemCrashView>;
-
-        open spec fn namespace(self) -> int { 0 }
 
         open spec fn pre(self, op: DiskWriteOp) -> bool {
             &&& self.frac.valid(op.id, 1)
@@ -105,6 +103,8 @@ verus! {
                 });
             r.split(1)
         }
+
+        proof fn peek(tracked &self, op: DiskWriteOp, tracked r: &Frac<MemCrashView>) {}
     }
 
     fn main()
