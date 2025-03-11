@@ -1,5 +1,6 @@
 use builtin::*;
 use vstd::prelude::*;
+use vstd::std_specs::hash::*;
 //use vstd::invariant::*;
 use vstd::rwlock::*;
 use std::collections::hash_map::*;
@@ -59,10 +60,14 @@ pub trait KVStore<Key, Value> : Sized {
 
     spec fn inv(&self) -> bool;
 
+    spec fn new_pre() -> bool;
+
     /// On initialization, this store creates one fractional resource for every possible key in the map.
     /// Each key begins with an "uninitialized" value of None to represent that it is not present in the store.
     fn new() 
         -> (out: (Self, Tracked<FractionalResource<Map::<Key, Value>, 2>>))
+    requires
+        Self::new_pre()
     ensures 
         out.0.inv(),
         out.1@.valid(out.0.id(), 1),
@@ -137,18 +142,22 @@ struct HashKVStore<Key, Value> {
     locked_state: RwLock<HashKVState<Key, Value>, KVPred>,
 }
 
-impl<Key: Eq + Hash, Value: Clone> KVStore<Key, Value> for HashKVStore<Key, Value> {
+impl<Key: Eq + Hash> KVStore<Key, usize> for HashKVStore<Key, usize> {
     closed spec fn id(&self) -> int
     {
         self.locked_state.pred().id
     }
 
     open spec fn inv(&self) -> bool {
-        true // invariant is maintained by lock instead
+        &&& obeys_key_model::<Key>()
+    }
+
+    open spec fn new_pre() -> bool {
+        obeys_key_model::<Key>()
     }
 
     fn new() 
-        -> (out: (Self, Tracked<FractionalResource<Map::<Key, Value>, 2>>))
+        -> (out: (Self, Tracked<FractionalResource<Map::<Key, usize>, 2>>))
     // ensures
     //     out.0.inv(),
     //     out.1@.valid(out.0.id(), 1),
@@ -168,8 +177,8 @@ impl<Key: Eq + Hash, Value: Clone> KVStore<Key, Value> for HashKVStore<Key, Valu
         (HashKVStore{locked_state}, Tracked(client_frac))
     }
 
-    fn get<Lin: ReadLinearizer<KVStoreGetOperation<Key, Value>>>(&self, k: Key, Tracked(lin): Tracked<Lin>) 
-        -> (out: (Option::<Value>, Tracked<Lin::ApplyResult>))
+    fn get<Lin: ReadLinearizer<KVStoreGetOperation<Key, usize>>>(&self, k: Key, Tracked(lin): Tracked<Lin>) 
+        -> (out: (Option::<usize>, Tracked<Lin::ApplyResult>))
     // requires
     //     self.inv(),
     //     lin@.pre(self.get_op(k))
@@ -180,21 +189,15 @@ impl<Key: Eq + Hash, Value: Clone> KVStore<Key, Value> for HashKVStore<Key, Valu
         let state = read_handle.borrow();
 
         let phy_result_ref = state.phy.get(&k);
-        let phy_result = if phy_result_ref.is_some() { Some(phy_result_ref.unwrap().clone()) } else { None };
-
-        assert(state.rsrc@.valid(self.get_op(k).id, 1));
-        assert(state.rsrc@.val().contains_key(k) ==> state.phy@.contains_key(k));
-        assume(state.phy@.contains_key(k) ==> phy_result == Some(state.phy@[k]));
-        assert(!state.rsrc@.val().contains_key(k) ==> !state.phy@.contains_key(k));
-        assume(!state.phy@.contains_key(k) ==> phy_result == None::<Value>);
-
+        let phy_result = if phy_result_ref.is_some() { Some(*phy_result_ref.unwrap()) } else { None };
+        
         let tracked ar = lin.apply(self.get_op(k), &state.rsrc, &phy_result);
 
         read_handle.release_read();
         (phy_result, Tracked(ar))
     }
 
-    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, Value>>>(&mut self, k: Key, v: Value, Tracked(lin): Tracked<Lin>) 
+    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, usize>>>(&mut self, k: Key, v: usize, Tracked(lin): Tracked<Lin>) 
         -> (out: Tracked<Lin::ApplyResult>)
     // requires
     //     old(self).inv(),
@@ -212,10 +215,7 @@ impl<Key: Eq + Hash, Value: Clone> KVStore<Key, Value> for HashKVStore<Key, Valu
 
         let tracked ar = lin.apply(op, (), state.rsrc.borrow_mut(), &());
 
-        assert(state.rsrc@.valid(self.id(), 1));
-        assume(state.phy@.dom() == state.rsrc@.val().dom());
-        assume(forall |j| #[trigger] state.rsrc@.val().contains_key(j) ==> state.phy@.contains_key(j) && state.rsrc@.val()[j] == state.phy@[j]);
-        assume(forall |j| !state.rsrc@.val().contains_key(j) ==> !state.phy@.contains_key(j));
+        assert(state.phy@.dom() == state.rsrc@.val().dom());
         lock_handle.release_write(state);
         Tracked(ar)
     }
