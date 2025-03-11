@@ -8,30 +8,121 @@ use crate::kvstore::*;
 
 verus! {
 
-pub struct ShardedBankGetSemantics { }
+/// atomic invariant
+struct KVStoreInvK {
+    down_id: int,
+    up_id: int
+}
 
-impl CallBackSemantics for ShardedBankGetSemantics {
-    type Param = FractionalResource<Option::<u32>, 2>;
-    type GhostResult = ();
-    type ExecResult = Option::<u32>;
+struct KVStoreInvV<Key, Value, UpOp: ReadOperation> {
+    down_frac: FractionalResource<Map::<Key, Option::<Value>>, 2>,
+    up_frac: UpOp::Resource,
+}
 
-    open spec fn requires(id: int, p: Self::Param, e: Self::ExecResult) -> bool
+struct KVStoreInvPred {
+}
+
+impl<Key, Value, UpOp: ReadOperation> InvariantPredicate<KVStoreInvK, KVStoreInvV<Key, Value, UpOp>> for KVStoreInvPred {
+    closed spec fn inv(k: KVStoreInvK, v: KVStoreInvV<Key, Value, UpOp>) -> bool
     {
-        &&& p.valid(id, 1)
-        &&& p.val() == e
+        &&& v.down_frac.valid(k.down_id, 1)
+        &&& v.up_frac.valid(k.up_id, 1)
+    }
+}
+
+/// get operation
+pub struct KVStoreGetOperation<Key, Value, UpOp: ReadOperation> {
+    pub id: int,
+    pub dummy_key: Key,
+    pub dummy_value: Value,
+    pub up_op: UpOp
+}
+
+impl<Key, Value, UpOp: ReadOperation> ReadOperation for KVStoreGetOperation<Key, Value, UpOp> {
+    type Resource = Tracked<FractionalResource<Map::<Key, Option::<Value>>, 2>>;
+    type ExecResult = Option::<Value>;
+
+    spec fn requires(self, r: Self::Resource, e: Self::ExecResult) -> bool {
+        &&& r@.valid(self.id, 1)
+        &&& r@.val() == e
+    }
+}
+
+pub struct KVStoreGetLinearizer<'a, Key, Value, UpOp: ReadOperation, UpLinearizer: ReadLinearizer<UpOp>> {
+    invariant: &'a Tracked<AtomicInvariant<KVStoreInvK, KVStoreInvV<Key, Value, UpOp>, KVStoreInvPred>>,
+    tracked credit: OpenInvariantCredit,
+    pub up_linearizer: UpLinearizer,
+}
+
+impl<'a, Key, Value, UpOp: ReadOperation, UpLinearizer: ReadLinearizer<UpOp>> ReadLinearizer<KVStoreGetOperation<Key, Value, UpOp>> for KVStoreGetLinearizer<'a, Key, Value, UpOp, UpLinearizer> {
+    type ApplyResult = UpLinearizer::ApplyResult;
+
+    open spec fn inv_namespace(&self) -> int {
+        self.invariant@.namespace()
     }
 
-    open spec fn ensures(id: int, p: Self::Param, e: Self::GhostResult) -> bool
-    {
-        true
+    open spec fn other_namespace(&self) -> int {
+        self.up_linearizer.inv_namespace()
     }
+
+    open spec fn pre(self, op: KVStoreGetOperation<Key, Value, UpOp>) -> bool {
+        &&& self.invariant@.constant().down_id == op.id
+        &&& self.inv_namespace() != self.other_namespace() // temp
+        &&& self.up_linearizer.other_namespace() != self.inv_namespace() // temp
+        &&& self.up_linearizer.pre(op.up_op)
+    }
+
+    proof fn apply(tracked self, op: KVStoreGetOperation<Key, Value, UpOp>, tracked r: &<KVStoreGetOperation<Key, Value, UpOp> as ReadOperation>::Resource, e: &<KVStoreGetOperation<Key, Value, UpOp> as ReadOperation>::ExecResult) -> (tracked out: Self::ApplyResult) 
+        // requires
+        //     self.pre(op),
+        //     op.requires(*r, *e),
+        // ensures
+        //     self.post(op, *e, out),
+        // opens_invariants
+        //     [ self.inv_namespace(), self.other_namespace() ];
+    {
+        let tracked mut ar;
+        open_atomic_invariant!(&self.invariant.borrow() => inv_val => {
+            inv_val.down_frac.agree(r.borrow());
+            ar = self.up_linearizer.apply(op.up_op, &inv_val.up_frac, e);
+        });
+        (ar)
+    }
+}
+
+trait ShardedBankGetCallBack : Sized {
+    type CBResult;
+
+    spec fn inv(&self) -> bool
+        ;
+
+    spec fn id(&self) -> int
+        ;
+
+    spec fn inv_namespace(&self) -> int
+        ;
+
+    spec fn post(&self, return_val: Option<u32>, result: Self::CBResult) -> bool
+        ;
+
+    proof fn get_cb(tracked self, down_cb: KVStoreGetCallBack<u32>, return_val: Option<u32>) 
+        -> (tracked out: KVStoreGetCallBack::<u32>::CBResult)
+    requires
+        self.inv(),
+        //rsrc.valid(self.id(), 1),
+        //return_val == rsrc.val(),
+    ensures
+        //self.post(return_val, out),
+        down_cb.post(return_val, out),
+    opens_invariants [ self.inv_namespace() ]
+    ;
 }
 
 pub struct ShardedBankGetCB<'a> {
     pub rsrc: Tracked<&'a FractionalResource<Option::<u32>, 2>>
 }
 
-impl<'a> GenericSingleInvReadCallBack<ShardedBankGetSemantics> for ShardedBankGetCB<'a> {
+impl<'a> ShardedBankGetCB for ShardedBankGetCB<'a> {
     type CBResult = ();
     
     open spec fn inv(&self) -> bool
@@ -54,11 +145,11 @@ impl<'a> GenericSingleInvReadCallBack<ShardedBankGetSemantics> for ShardedBankGe
         return_val == self.rsrc@.val()
     }
 
-    proof fn cb(tracked self, tracked rsrc: &FractionalResource<Option::<u32>, 2>, return_val: &Option::<u32>) 
-        -> (tracked out: (<ShardedBankGetSemantics as CallBackSemantics>::GhostResult, Self::CBResult))
+    proof fn cb(tracked self, down_cb: KVStoreGetCallBack<u32>, return_val: &Option::<u32>) 
+        -> (tracked out: KVStoreGetCallBack::<u32>::CBResult)
     {
-        rsrc.agree(self.rsrc.borrow());
-        ((), ())
+        let cb_result = down_cb.get_cb(self.rsrc.borrow(), return_val);
+        cb_result
     }
 }
 
@@ -235,7 +326,7 @@ impl<Store: KVStore<u32, u32>> ShardedBank<Store> {
         let tracked my_fracs = Map::<u32, FractionalResource<Option::<u32>, 2>>::tracked_empty();
         let tracked client_fracs = Map::<u32, FractionalResource<Option::<u32>, 2>>::tracked_empty();
         let ghost ids = Map::<u32, int>::empty();
-        let mut k: u32 = 0;
+        let mut k: u32 = 0; // can this be ghost?
         while k < u32::MAX 
             invariant 
                 0 <= k <= u32::MAX,
