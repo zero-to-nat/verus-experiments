@@ -1,15 +1,10 @@
 use builtin::*;
 use vstd::prelude::*;
 use state_machines_macros::*;
-use crate::logatom::*;
 use std::marker::PhantomData;
-use vstd::rwlock::*;
-use vstd::std_specs::hash::*;
-use std::collections::hash_map::*;
-use std::hash::*;
+use crate::logatom::*;
 
 verus! {
-broadcast use vstd::std_specs::hash::group_hash_axioms;
 
 tokenized_state_machine! {
     #[verifier::reject_recursive_types(Key)]
@@ -171,120 +166,4 @@ pub trait KVStore<Key, Value> : Sized {
         lin.post(*old(lin), put_op(self.id(), k, v), (), out@)
     ;
 }
-
-/// KVStore implementation with single lock and hash table
-#[verifier::reject_recursive_types(Key)]
-struct HashKVState<Key, Value> {
-    phy: HashMap<Key, Value>,
-    inst: Tracked<KVStoreSM::Instance<Key, Value>>,
-    inner: Tracked<KVStoreSM::inner<Key, Value>>,
-}
-
-struct KVPred {
-    id: InstanceId
-}
-
-impl<Key, Value> RwLockPredicate<HashKVState<Key, Value>> for KVPred {
-    closed spec fn inv(self, v: HashKVState<Key, Value>) -> bool {
-        &&& v.inst@.id() == self.id
-        &&& v.inner@.instance_id() == self.id
-        &&& v.inner@.value() == v.phy@
-    }
-}
-
-#[verifier::reject_recursive_types(Key)]
-struct HashKVStore<Key, Value> {
-    locked_state: RwLock<HashKVState<Key, Value>, KVPred>,
-}
-
-impl<Key: Eq + Hash> KVStore<Key, usize> for HashKVStore<Key, usize> {
-    closed spec fn id(&self) -> InstanceId
-    {
-        self.locked_state.pred().id
-    }
-
-    open spec fn inv(&self) -> bool {
-        &&& obeys_key_model::<Key>()
-    }
-
-    open spec fn new_pre() -> bool {
-        obeys_key_model::<Key>()
-    }
-
-    fn new() 
-        -> (out: (Self, Tracked<KVStoreSM::client<Key, usize>>))
-    // ensures
-    //     out.0.inv(),
-    //     out.1@.valid(out.0.id(), 1),
-    //     forall |k: Key| #![trigger out.1@.val().contains_key(k)]
-    //     {
-    //         &&& !out.1@.val().contains_key(k)
-    //     };
-    {
-        let mut phy = HashMap::new();
-
-        let tracked (
-            Tracked(inst),
-            Tracked(inner),
-            Tracked(client)
-        ) = KVStoreSM::Instance::initialize(Map::<Key, usize>::empty(), Map::<Key, usize>::empty());
-
-        let state = HashKVState { 
-            phy: phy,
-            inst: Tracked(inst),
-            inner: Tracked(inner)
-        };
-
-        let ghost pred = KVPred { 
-            id: inst.id()
-        };
-
-        let locked_state = RwLock::new(state, Ghost(pred));
-
-        (HashKVStore{locked_state}, Tracked(client))
-    }
-
-    fn get<Lin: ReadLinearizer<KVStoreGetOperation<Key, usize>>>(&self, k: Key, Tracked(lin): Tracked<Lin>) 
-        -> (out: (Option::<usize>, Tracked<Lin::ApplyResult>))
-    // requires
-    //     self.inv(),
-    //     lin@.pre(self.get_op(k))
-    // ensures 
-    //     lin@.post(self.get_op(k), out.0, out.1@)
-    {
-        let read_handle = self.locked_state.acquire_read();
-        let state = read_handle.borrow();
-
-        let phy_result_ref = state.phy.get(&k);
-        let phy_result = if phy_result_ref.is_some() { Some(*phy_result_ref.unwrap()) } else { None };  // could use clone + extra assumption about equality
-        
-        let tracked ar = lin.apply(get_op(self.id(), k), state.inst, &state.inner, &phy_result);
-
-        read_handle.release_read();
-        (phy_result, Tracked(ar))
-    }
-
-    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, usize>>>(&self, k: Key, v: usize, tracked lin: &mut Lin) 
-        -> (out: Tracked<Lin::ApplyResult>)
-    // requires
-    //     old(self).inv(),
-    //     lin@.pre(old(self).put_op(k, v))
-    // ensures
-    //     self.inv(),
-    //     self.id() == old(self).id(),
-    //     lin@.post(old(self).put_op(k, v), (), out@)
-    {   
-        let (mut state, lock_handle) = self.locked_state.acquire_write();
-        let ghost op = put_op(self.id(), k, v);
-        let ghost old_phy = state.phy@;
-
-        state.phy.insert(k, v);
-
-        let tracked ar = lin.apply(op, (), state.inst, state.inner.borrow_mut(), &());
-
-        lock_handle.release_write(state);
-        Tracked(ar)
-    }
-}
-
 }

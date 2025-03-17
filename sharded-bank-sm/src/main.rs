@@ -5,7 +5,8 @@ verus! {
 pub mod interface;
 pub mod logatom;
 pub mod kvstore;
-pub mod sharded_bank;
+pub mod hashkvstore;
+pub mod shardedbank;
 
 fn main() {
 }
