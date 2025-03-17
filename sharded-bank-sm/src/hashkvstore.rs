@@ -57,8 +57,9 @@ impl<Key: Eq + Hash, Value : Copy> KVStore<Key, Value> for HashKVStore<Key, Valu
         let tracked (
             Tracked(inst),
             Tracked(inner),
-            Tracked(client)
-        ) = KVStoreSM::Instance::initialize(Map::<Key, Value>::empty(), Map::<Key, Value>::empty());
+            Tracked(client_opt)
+        ) = KVStoreSM::Instance::initialize();
+        let tracked client = client_opt.tracked_unwrap();
 
         let state = HashKVState { 
             phy: phy,
@@ -90,7 +91,7 @@ impl<Key: Eq + Hash, Value : Copy> KVStore<Key, Value> for HashKVStore<Key, Valu
         (phy_result, Tracked(ar))
     }
 
-    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, Value>>>(&self, k: Key, v: Value, tracked lin: &mut Lin) 
+    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, Value>>>(&self, k: Key, v: Value, Tracked(lin): Tracked<Lin>) 
         -> (out: Tracked<Lin::ApplyResult>)
     {   
         let (mut state, lock_handle) = self.locked_state.acquire_write();

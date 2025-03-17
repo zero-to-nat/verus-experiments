@@ -13,48 +13,49 @@ tokenized_state_machine! {
             #[sharding(variable)]
             pub inner: Map<Key, Value>,
 
-            #[sharding(variable)]
-            pub client: Map<Key, Value>
+            #[sharding(option)]
+            pub client: Option<Map<Key, Value>>
         }
 
         init! {
-            initialize(innr: Map<Key, Value>, cl: Map<Key, Value>) 
+            initialize() 
             {
-                require innr == Map::<Key, Value>::empty();
-                require cl == Map::<Key, Value>::empty();
-
-                init inner = innr;
-                init client = cl;
+                init inner = Map::<Key, Value>::empty();
+                init client = Some(Map::<Key, Value>::empty());
             }
         }
 
         property! {
             get(k: Key, v: Option<Value>) {
+                have client >= Some(let cl);
+
                 require pre.inner.contains_key(k) ==> v == Some(pre.inner[k]);
                 require !pre.inner.contains_key(k) ==> v == None::<Value>;
 
-                assert pre.client == pre.inner by {
+                assert pre.inner == cl by {
                     assert(pre.inv());
                 };
             }
         }
 
         transition! {
-            put(k: Key, v: Value, new_inner: Map<Key, Value>) {
-                assert pre.client == pre.inner by {
+            put(k: Key, v: Value) {
+                remove client -= Some(let old_client);
+
+                assert (pre.inner == old_client) by {
                     assert(pre.inv());
                 };
 
-                require new_inner == pre.inner.insert(k, v);
-                
-                update inner = new_inner;
-                update client = new_inner;
+                update inner = pre.inner.insert(k, v);
+                add client += Some(pre.inner.insert(k, v));
             }
         }
 
         property! {
             agree() {
-                assert pre.client == pre.inner by {
+                have client >= Some(let cl);
+
+                assert pre.inner == cl by {
                     assert(pre.inv());
                 };
             }
@@ -62,18 +63,20 @@ tokenized_state_machine! {
 
         #[invariant]
         pub spec fn inv(&self) -> bool {
-            &&& self.inner == self.client
+            &&& self.client.is_some()
+            &&& self.inner == self.client.unwrap()
         }
 
         #[inductive(initialize)]
-        fn initialize_inductive(post: Self, innr: Map<Key, Value>, cl: Map<Key, Value>) { }
+        fn initialize_inductive(post: Self) { }
               
         #[inductive(put)]
-        fn put_inductive(pre: Self, post: Self, k: Key, v: Value, new_inner: Map<Key, Value>) { }
+        fn put_inductive(pre: Self, post: Self, k: Key, v: Value) { }
     }
 }
 
 /// get operation
+/// is this "the same" as KVStoreSM::get ?
 pub struct KVStoreGetOperation<Key, Value> {
     pub id: InstanceId,
     pub k: Key,
@@ -157,13 +160,13 @@ pub trait KVStore<Key, Value> : Sized {
     ;
 
     /// Inserts the given key-value pair into the store, overwriting the old value.
-    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, Value>>>(&self, k: Key, v: Value, tracked lin: &mut Lin) 
+    fn put<Lin: MutLinearizer<KVStorePutOperation<Key, Value>>>(&self, k: Key, v: Value, lin: Tracked<Lin>) 
         -> (out: Tracked<Lin::ApplyResult>)
     requires
         self.inv(),
-        old(lin).pre(put_op(self.id(), k, v))
+        lin@.pre(put_op(self.id(), k, v))
     ensures
-        lin.post(*old(lin), put_op(self.id(), k, v), (), out@)
+        lin@.post(put_op(self.id(), k, v), (), out@)
     ;
 }
 }

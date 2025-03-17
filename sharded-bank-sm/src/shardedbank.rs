@@ -1,8 +1,9 @@
 use builtin::*;
 use vstd::prelude::*;
-use state_machines_macros::*;
+use vstd::rwlock::*;
 use crate::logatom::*;
 use crate::kvstore::*;
+use crate::bank::*;
 
 verus! {
 
@@ -68,95 +69,6 @@ pub fn diff_option(v1: Option::<u32>, v2: u32) -> (out: Option::<u32>)
     }
 }
 
-tokenized_state_machine! {
-    ShardedBankSM {
-        fields {
-            #[sharding(variable)]
-            pub left_client: KVStoreSM::client<u32, u32>,
-
-            #[sharding(variable)]
-            pub right_client: KVStoreSM::client<u32, u32>,
-
-            #[sharding(variable)]
-            pub inner: Map<u32, u32>,
-
-            #[sharding(variable)]
-            pub client: Map<u32, u32>,
-        }
-
-        init! {
-            initialize(left_client: KVStoreSM::client<u32, u32>, 
-                right_client: KVStoreSM::client<u32, u32>,
-                innr: Map<u32, u32>,
-                cl: Map<u32, u32>
-            ) {
-                require left_client.value() == Map::<u32, u32>::empty();
-                require right_client.value() == Map::<u32, u32>::empty();
-                require innr == Map::<u32, u32>::empty();
-                require cl == Map::<u32, u32>::empty();
-
-                init left_client = left_client;
-                init right_client = right_client;
-                init inner = innr;
-                init client = cl;
-            }
-        }
-
-        transition! {
-            deposit(a: u32, v: u32, new_total: u32, new_left: KVStoreSM::client<u32, u32>, new_right: KVStoreSM::client<u32, u32>, new_inner: Map<u32, u32>) {
-                require pre.inner.contains_key(a);
-                require pre.inner[a] + v <= u32::MAX;
-                require new_total == pre.inner[a] + v;
-
-                require new_inner == pre.inner.insert(a, new_total);
-                require forall |k: u32| #![trigger new_inner.contains_key(k)] sum_option_spec(val_or_none(new_left.value(), k), val_or_none(new_right.value(), k), val_or_none(new_inner, k));
-                require new_left.instance_id() == pre.left_client.instance_id();
-                require new_right.instance_id() == pre.right_client.instance_id();
-                
-                update left_client = new_left;
-                update right_client = new_right;
-                update inner = new_inner;
-                update client = new_inner;
-            }
-        }
-
-        transition! {
-            withdraw(a: u32, v: u32, new_total: u32, new_left: KVStoreSM::client<u32, u32>, new_right: KVStoreSM::client<u32, u32>, new_inner: Map<u32, u32>) {
-                require pre.inner.contains_key(a);
-                require 0 <= pre.inner[a] - v;
-                require new_total == pre.inner[a] - v;
-
-                require new_inner == pre.inner.insert(a, new_total);
-                require forall |k: u32| #![trigger new_inner.contains_key(k)] sum_option_spec(val_or_none(new_left.value(), k), val_or_none(new_right.value(), k), val_or_none(new_inner, k));
-                require new_left.instance_id() == pre.left_client.instance_id();
-                require new_right.instance_id() == pre.right_client.instance_id();
-                
-                update left_client = new_left;
-                update right_client = new_right;
-                update inner = new_inner;
-                update client = new_inner;
-            }
-        }
-
-        #[invariant]
-        pub spec fn inv(&self) -> bool {
-            &&& self.inner == self.client
-            &&& forall |k: u32| #![trigger self.inner.contains_key(k)] {
-                sum_option_spec(val_or_none(self.left_client.value(), k), val_or_none(self.right_client.value(), k), val_or_none(self.inner, k))
-            }
-        }
-
-        #[inductive(initialize)]
-        fn initialize_inductive(post: Self, left_client: KVStoreSM::client<u32, u32>, right_client: KVStoreSM::client<u32, u32>, innr: Map<u32, u32>, cl: Map<u32, u32>) { }
-
-        #[inductive(deposit)]
-        fn deposit_inductive(pre: Self, post: Self, a: u32, v: u32, new_total: u32, new_left: KVStoreSM::client<u32, u32>, new_right: KVStoreSM::client<u32, u32>, new_inner: Map<u32, u32>) { }
-
-        #[inductive(withdraw)]
-        fn withdraw_inductive(pre: Self, post: Self, a: u32, v: u32, new_total: u32, new_left: KVStoreSM::client<u32, u32>, new_right: KVStoreSM::client<u32, u32>, new_inner: Map<u32, u32>) { }
-    }
-}
-
 struct KVStoreExclusiveGetLinearizer {
     pub client: KVStoreSM::client<u32, u32>,
 }
@@ -188,7 +100,7 @@ impl ReadLinearizer<KVStoreGetOperation<u32, u32>> for KVStoreExclusiveGetLinear
         self.client
     }
 
-    proof fn peek(tracked &self, op: KVStoreGetOperation<u32, u32>, tracked r: &<KVStoreGetOperation<u32, u32> as ReadOperation>::Resource) {}
+    proof fn peek(tracked &self, op: KVStoreGetOperation<u32, u32>, tracked inst: <KVStoreGetOperation<u32, u32> as ReadOperation>::Instance, tracked r: &<KVStoreGetOperation<u32, u32> as ReadOperation>::Resource) {}
 }
 
 struct KVStoreExclusivePutLinearizer {
@@ -196,18 +108,18 @@ struct KVStoreExclusivePutLinearizer {
 }
 
 impl MutLinearizer<KVStorePutOperation<u32, u32>> for KVStoreExclusivePutLinearizer {
-    type ApplyResult = ();
+    type ApplyResult = KVStoreSM::client<u32, u32>;
 
     open spec fn pre(self, op: KVStorePutOperation<u32, u32>) -> bool {
         self.client.instance_id() == op.id
     }
 
-    open spec fn post(self, old_self: KVStoreExclusivePutLinearizer, op: KVStorePutOperation<u32, u32>, r: <KVStorePutOperation<u32, u32> as MutOperation>::ExecResult, ar: Self::ApplyResult) -> bool {
-        &&& self.client.instance_id() == op.id
-        &&& self.client.value() == old_self.client.value().insert(op.k, op.v)
+    open spec fn post(self, op: KVStorePutOperation<u32, u32>, r: <KVStorePutOperation<u32, u32> as MutOperation>::ExecResult, ar: Self::ApplyResult) -> bool {
+        &&& ar.instance_id() == op.id
+        &&& ar.value() == self.client.value().insert(op.k, op.v)
     }
 
-    proof fn apply(tracked &mut self, 
+    proof fn apply(tracked self, 
         op: KVStorePutOperation<u32, u32>, 
         hint: <KVStorePutOperation<u32, u32> as MutOperation>::ApplyHint, 
         tracked inst: <KVStorePutOperation<u32, u32> as MutOperation>::Instance,
@@ -215,11 +127,153 @@ impl MutLinearizer<KVStorePutOperation<u32, u32>> for KVStoreExclusivePutLineari
         e: &<KVStorePutOperation<u32, u32> as MutOperation>::ExecResult,) 
     -> (tracked out: Self::ApplyResult) 
     {
-        let tracked _ = inst.borrow().put(op.k, op.v, r.value().insert(op.k, op.v), r, &mut self.client);
-        ()
+        let tracked cl = inst.borrow().put(op.k, op.v, r, self.client);
+        cl
     }
 
-    proof fn peek(tracked &self, op: KVStorePutOperation<u32, u32>, tracked r: &<KVStorePutOperation<u32, u32> as MutOperation>::Resource) {}
+    proof fn peek(tracked &self, op: KVStorePutOperation<u32, u32>, tracked inst: <KVStorePutOperation<u32, u32> as MutOperation>::Instance, tracked r: &<KVStorePutOperation<u32, u32> as MutOperation>::Resource) {}
+}
+
+
+struct ShardedBankLockedState {
+    left_client: Tracked<KVStoreSM::client<u32, u32>>,
+    right_client: Tracked<KVStoreSM::client<u32, u32>>,
+    bank_inst: Tracked<BankSM::Instance>,
+    bank_owned: Tracked<BankSM::inner>,
+}
+
+struct ShardedBankPred {
+    left_id: InstanceId,
+    right_id: InstanceId,
+    bank_id: InstanceId
+}
+
+impl RwLockPredicate<ShardedBankLockedState> for ShardedBankPred {
+    closed spec fn inv(self, v: ShardedBankLockedState) -> bool {
+        &&& v.left_client@.instance_id() == self.left_id
+        &&& v.right_client@.instance_id() == self.right_id
+        &&& v.bank_owned@.instance_id() == self.bank_id
+        &&& v.bank_inst@.id() == self.bank_id
+        &&& forall |k: u32| #![trigger v.bank_owned@.value().contains_key(k)] {
+            sum_option_spec(val_or_none(v.left_client@.value(), k), val_or_none(v.right_client@.value(), k), val_or_none(v.bank_owned@.value(), k))
+        }
+    }
+}
+
+struct ShardedBank<Store: KVStore<u32, u32>>  {
+    pub locked_state: RwLock<ShardedBankLockedState, ShardedBankPred>,
+    pub left_store: Store,
+    pub right_store: Store
+}
+
+impl<Store: KVStore<u32, u32>> Bank for ShardedBank<Store> {
+    closed spec fn id(&self) -> InstanceId {
+        self.locked_state.pred().bank_id
+    }
+
+    closed spec fn inv_namespace(self) -> int {
+        1
+    }
+
+    closed spec fn inv(&self) -> bool {
+        &&& self.left_store.inv()
+        &&& self.right_store.inv()
+        &&& self.left_store.id() == self.locked_state.pred().left_id
+        &&& self.right_store.id() == self.locked_state.pred().right_id
+    }
+
+    open spec fn new_pre() -> bool {
+        Store::new_pre()
+    }
+
+    fn new() 
+        -> (out: (Self, Tracked<BankSM::client>))
+    {
+        let (left_store, left_client) = Store::new();
+        let (right_store, right_client) = Store::new();
+        let tracked (
+            Tracked(inst),
+            Tracked(inner),
+            Tracked(client_opt)
+        ) = BankSM::Instance::initialize();
+        let tracked client = client_opt.tracked_unwrap();
+
+        let state = ShardedBankLockedState { left_client, right_client, bank_inst: Tracked(inst), bank_owned: Tracked(inner) };
+
+        let ghost pred = ShardedBankPred { left_id: left_client@.instance_id(), right_id: right_client@.instance_id(), bank_id: inner.instance_id() };
+        let locked_state = RwLock::new(state, Ghost(pred));
+
+        (ShardedBank{locked_state, left_store, right_store}, Tracked(client))
+    }
+
+    fn deposit<Lin: MutLinearizer<BankDepositOperation>>(&self, a: u32, v: u32, Tracked(lin): Tracked<Lin>) 
+        -> (out: Tracked<Lin::ApplyResult>)
+    {
+        let (mut state, lock_handle) = self.locked_state.acquire_write();
+
+        proof { lin.peek(deposit_op(self.id(), a, v), state.bank_inst, state.bank_owned.borrow()) };
+
+        let left_lin = Tracked(KVStoreExclusiveGetLinearizer { client: state.left_client.get() });
+        let (old_left, left_client) = self.left_store.get::<KVStoreExclusiveGetLinearizer>(a, left_lin);
+        state.left_client = left_client;
+
+        let right_lin = Tracked(KVStoreExclusiveGetLinearizer { client: state.right_client.get() });
+        let (old_right, right_client) = self.right_store.get::<KVStoreExclusiveGetLinearizer>(a, right_lin);
+        state.right_client = right_client;
+
+        let new_left_balance = sum_option(old_left, Some(v));
+        let put_lin = Tracked(KVStoreExclusivePutLinearizer { client: state.left_client.get() });
+        let left_client = self.left_store.put::<KVStoreExclusivePutLinearizer>(a, new_left_balance.unwrap(), put_lin);
+        state.left_client = left_client;
+
+        let new_balance = sum_option(new_left_balance, old_right).unwrap();
+        let tracked ar = lin.apply(deposit_op(self.id(), a, v), (), state.bank_inst, state.bank_owned.borrow_mut(), &());
+
+        lock_handle.release_write(state);
+        (Tracked(ar))
+    }
+
+    fn withdraw<Lin: MutLinearizer<BankWithdrawOperation>>(&self, a: u32, v: u32, Tracked(lin): Tracked<Lin>) 
+        -> (out: Tracked<Lin::ApplyResult>)
+    {
+        let (mut state, lock_handle) = self.locked_state.acquire_write();
+
+        proof { lin.peek(withdraw_op(self.id(), a, v), state.bank_inst, state.bank_owned.borrow()) };
+
+        let ghost ghost_left_client = state.left_client;
+        let ghost ghost_bank = state.bank_owned;
+
+        let left_lin = Tracked(KVStoreExclusiveGetLinearizer { client: state.left_client.get() });
+        let (old_left, left_client) = self.left_store.get::<KVStoreExclusiveGetLinearizer>(a, left_lin);
+        state.left_client = left_client;
+
+        let right_lin = Tracked(KVStoreExclusiveGetLinearizer { client: state.right_client.get() });
+        let (old_right, right_client) = self.right_store.get::<KVStoreExclusiveGetLinearizer>(a, right_lin);
+        state.right_client = right_client;
+
+        let left_withdraw_amt = if (v > unwrap_or_zero(old_left)) { unwrap_or_zero(old_left) } else { v };
+        let right_withdraw_amt = if (v > unwrap_or_zero(old_left)) { v - left_withdraw_amt } else { 0 };
+        let new_left_balance = diff_option(old_left, left_withdraw_amt);
+        let new_right_balance = diff_option(old_right, right_withdraw_amt);
+
+        if (left_withdraw_amt > 0) {
+            let put_lin = Tracked(KVStoreExclusivePutLinearizer { client: state.left_client.get() });
+            let left_client = self.left_store.put::<KVStoreExclusivePutLinearizer>(a, new_left_balance.unwrap(), put_lin); 
+            state.left_client = left_client;
+        }
+
+        if (right_withdraw_amt > 0) {
+            let put_lin = Tracked(KVStoreExclusivePutLinearizer { client: state.right_client.get() });
+            let right_client = self.right_store.put::<KVStoreExclusivePutLinearizer>(a, new_right_balance.unwrap(), put_lin); 
+            state.right_client = right_client;
+        }
+
+        let new_balance = sum_option(new_left_balance, new_right_balance).unwrap();
+        let tracked ar = lin.apply(withdraw_op(self.id(), a, v), (), state.bank_inst, state.bank_owned.borrow_mut(), &());
+
+        lock_handle.release_write(state);
+        Tracked(ar)
+    }
 }
 
 }

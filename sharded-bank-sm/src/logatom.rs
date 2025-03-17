@@ -10,8 +10,8 @@ verus! {
 
         // Optionally support peeking, which provides initial validation
         // before the operation is linearized.
-        open spec fn peek_requires(self, r: Self::Resource) -> bool { true }
-        open spec fn peek_ensures(self, r: Self::Resource) -> bool { true }
+        open spec fn peek_requires(self, inst: Self::Instance, r: Self::Resource) -> bool { true }
+        open spec fn peek_ensures(self, inst: Self::Instance, r: Self::Resource) -> bool { true }
     }
 
     pub trait MutOperation : Sized {
@@ -25,8 +25,8 @@ verus! {
 
         // Optionally support peeking, which provides initial validation
         // before the operation is linearized.
-        open spec fn peek_requires(self, r: Self::Resource) -> bool { true }
-        open spec fn peek_ensures(self, r: Self::Resource) -> bool { true }
+        open spec fn peek_requires(self, inst: Self::Instance, r: Self::Resource) -> bool { true }
+        open spec fn peek_ensures(self, inst: Self::Instance, r: Self::Resource) -> bool { true }
     }
 
     pub trait ReadLinearizer<Op: ReadOperation> : Sized {
@@ -62,12 +62,12 @@ verus! {
             opens_invariants
                 [ self.inv_namespace(), self.other_namespace() ];
 
-        proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
+        proof fn peek(tracked &self, op: Op, tracked inst: Op::Instance, tracked r: &Op::Resource)
             requires
                 self.pre(op),
-                op.peek_requires(*r),
+                op.peek_requires(inst, *r),
             ensures
-                op.peek_ensures(*r),
+                op.peek_ensures(inst, *r),
             opens_invariants
                 [ self.inv_namespace(), self.other_namespace() ];
     }
@@ -90,26 +90,26 @@ verus! {
             true
         }
 
-        open spec fn post(self, old_self: Self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
+        open spec fn post(self, op: Op, r: Op::ExecResult, ar: Self::ApplyResult) -> bool {
             true
         }
 
-        proof fn apply(tracked &mut self, op: Op, hint: Op::ApplyHint, tracked inst: Op::Instance, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
+        proof fn apply(tracked self, op: Op, hint: Op::ApplyHint, tracked inst: Op::Instance, tracked r: &mut Op::Resource, e: &Op::ExecResult) -> (tracked out: Self::ApplyResult)
             requires
-                old(self).pre(op),
+                self.pre(op),
                 op.requires(hint, inst, *old(r), *e),
             ensures
                 op.ensures(hint, inst, *old(r), *r),
-                self.post(*old(self), op, *e, out),
+                self.post(op, *e, out),
             opens_invariants
-                [ old(self).inv_namespace(), old(self).other_namespace() ];
+                [ self.inv_namespace(), self.other_namespace() ];
 
-        proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
+        proof fn peek(tracked &self, op: Op, tracked inst: Op::Instance, tracked r: &Op::Resource)
             requires
                 self.pre(op),
-                op.peek_requires(*r),
+                op.peek_requires(inst, *r),
             ensures
-                op.peek_ensures(*r),
+                op.peek_ensures(inst, *r),
             opens_invariants
                 [ self.inv_namespace(), self.other_namespace() ];
     }
