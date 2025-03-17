@@ -198,43 +198,12 @@ impl MutLinearizer<KVStorePutOperation<u32, usize>> for KVStoreExclusivePutLinea
         e: &<KVStorePutOperation<u32, usize> as MutOperation>::ExecResult,) 
     -> (tracked out: Self::ApplyResult) 
     {
-        let tracked _ = inst.borrow().agree(r, &self.client); // needed to show that old(self).client.value() == old(r).value()
+        //let tracked _ = inst.borrow().agree(r, &self.client); // needed to show that old(self).client.value() == old(r).value()
         let tracked _ = inst.borrow().put(op.k, op.v, r.value().insert(op.k, op.v), r, &mut self.client);
         ()
     }
 
     proof fn peek(tracked &self, op: KVStorePutOperation<u32, usize>, tracked r: &<KVStorePutOperation<u32, usize> as MutOperation>::Resource) {}
 }
-
-/*
-pub struct ShardedBankState {
-    pub left_store: HashMap<u32, usize>,
-    pub inst: Tracked<KVStoreSM::Instance>,
-    pub tokens: Tracked<Map<Key, KVStoreSM::tok>>
-}
-
-struct KVPred {
-    pub keys: Set<Key>
-}
-
-impl RwLockPredicate<KVState> for KVPred {
-    closed spec fn inv(self, kv: KVState) -> bool {
-        forall |k| #[trigger] self.keys.contains(k)
-        ==> {
-            &&& kv.phy@.contains_key(k)
-            &&& kv.tokens@.contains_key(k)
-            &&& kv.tokens@[k]@.key == k
-            &&& kv.tokens@[k]@.instance == kv.inst@
-            &&& kv.tokens@[k]@.value.is_some()
-            &&& kv.tokens@[k]@.value.unwrap() == kv.phy@[k]
-        }
-
-    }
-}
-
-struct KVStore {
-    locked_state: RwLock<KVState, KVPred>,
-}
-    */
 
 }

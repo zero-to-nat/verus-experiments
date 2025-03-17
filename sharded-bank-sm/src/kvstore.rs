@@ -38,10 +38,7 @@ tokenized_state_machine! {
                 require pre.inner.contains_key(k) ==> v == Some(pre.inner[k]);
                 require !pre.inner.contains_key(k) ==> v == None::<Value>;
 
-                assert pre.client.contains_key(k) ==> v == Some(pre.client[k]) by {
-                    assert(pre.inv());
-                };
-                assert !pre.client.contains_key(k) ==> v == None::<Value> by {
+                assert pre.client == pre.inner by {
                     assert(pre.inv());
                 };
             }
@@ -49,14 +46,14 @@ tokenized_state_machine! {
 
         transition! {
             put(k: Key, v: Value, new_inner: Map<Key, Value>) {
+                assert pre.client == pre.inner by {
+                    assert(pre.inv());
+                };
+
                 require new_inner == pre.inner.insert(k, v);
                 
                 update inner = new_inner;
                 update client = new_inner;
-
-                assert new_inner.contains_key(k) && new_inner[k] == v by {
-
-                };
             }
         }
 
