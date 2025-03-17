@@ -85,6 +85,8 @@ pub open spec fn withdraw_op(id: int, a: u32, v: u32) -> BankWithdrawOperation {
 pub trait Bank : Sized {
     spec fn id(&self) -> int;
 
+    spec fn inv_namespace(self) -> int;
+
     spec fn inv(&self) -> bool;
 
     spec fn new_pre() -> bool;
@@ -99,6 +101,7 @@ pub trait Bank : Sized {
         out.1@.val() == Map::<u32, u32>::empty()
     ; 
 
+    /*
     fn deposit<Lin: MutLinearizer<BankDepositOperation>>(&self, a: u32, v: u32, lin: Tracked<Lin>) 
         -> (out: (u32, Tracked<Lin::ApplyResult>))
     requires
@@ -116,5 +119,6 @@ pub trait Bank : Sized {
     ensures
         lin@.post(withdraw_op(self.id(), a, v), out.0, out.1@)
     ;
+    */
 }
 }

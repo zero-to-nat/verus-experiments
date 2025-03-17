@@ -69,7 +69,7 @@ impl<Key: Eq + Hash, Value : Copy> KVStore<Key, Value> for HashKVStore<Key, Valu
         let state = read_handle.borrow();
 
         let phy_result_ref = state.phy.get(&k);
-        let phy_result = if phy_result_ref.is_some() { Some(*phy_result_ref.unwrap()) } else { None };  // could use clone + extra assumption about equality
+        let phy_result = if phy_result_ref.is_some() { Some(*phy_result_ref.unwrap()) } else { None };
         
         let tracked ar = lin.apply(get_op(self.id(), k), &state.rsrc, &phy_result);
 
