@@ -14,14 +14,13 @@ pub struct BankDepositOperation {
 
 impl MutOperation for BankDepositOperation {
     type Resource = FractionalResource<Map::<u32, u32>, 2>;
-    type ExecResult = u32;
+    type ExecResult = ();
     type ApplyHint = ();
 
     open spec fn requires(self, hint: Self::ApplyHint, r: Self::Resource, e: Self::ExecResult) -> bool {
         &&& r.valid(self.id, 1)
         &&& r.val().contains_key(self.a)
         &&& r.val()[self.a] + self.v <= u32::MAX
-        &&& e == r.val()[self.a] + self.v
     }
 
     open spec fn ensures(self, hint: Self::ApplyHint, pre: Self::Resource, post: Self::Resource) -> bool {
@@ -48,14 +47,13 @@ pub struct BankWithdrawOperation {
 
 impl MutOperation for BankWithdrawOperation {
     type Resource = FractionalResource<Map::<u32, u32>, 2>;
-    type ExecResult = u32;
+    type ExecResult = ();
     type ApplyHint = ();
 
     open spec fn requires(self, hint: Self::ApplyHint, r: Self::Resource, e: Self::ExecResult) -> bool {
         &&& r.valid(self.id, 1)
         &&& r.val().contains_key(self.a)
         &&& r.val()[self.a] - self.v >= 0
-        &&& e == r.val()[self.a] - self.v
     }
 
     open spec fn ensures(self, hint: Self::ApplyHint, pre: Self::Resource, post: Self::Resource) -> bool {
@@ -101,24 +99,24 @@ pub trait Bank : Sized {
         out.1@.val() == Map::<u32, u32>::empty()
     ; 
 
-    /*
     fn deposit<Lin: MutLinearizer<BankDepositOperation>>(&self, a: u32, v: u32, lin: Tracked<Lin>) 
-        -> (out: (u32, Tracked<Lin::ApplyResult>))
+        -> (out: (Tracked<Lin::ApplyResult>))
     requires
         self.inv(),
+        lin@.namespace() != self.inv_namespace(),
         lin@.pre(deposit_op(self.id(), a, v))
     ensures 
-        lin@.post(deposit_op(self.id(), a, v), out.0, out.1@)
+        lin@.post(deposit_op(self.id(), a, v), (), out@)
     ;
 
     fn withdraw<Lin: MutLinearizer<BankWithdrawOperation>>(&self, a: u32, v: u32, lin: Tracked<Lin>) 
-        -> (out: (u32, Tracked<Lin::ApplyResult>))
+        -> (out: Tracked<Lin::ApplyResult>)
     requires
         self.inv(),
+        lin@.namespace() != self.inv_namespace(),
         lin@.pre(withdraw_op(self.id(), a, v))
     ensures
-        lin@.post(withdraw_op(self.id(), a, v), out.0, out.1@)
+        lin@.post(withdraw_op(self.id(), a, v), (), out@)
     ;
-    */
 }
 }

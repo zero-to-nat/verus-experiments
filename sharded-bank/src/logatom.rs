@@ -30,17 +30,8 @@ verus! {
     pub trait ReadLinearizer<Op: ReadOperation> : Sized {
         type ApplyResult /* = () */;
 
-        // temp - currently unsupported
-        /*open spec fn namespaces(self) -> Set<int> {
+        open spec fn namespaces(self) -> Set<int> {
             Set::empty()
-        }*/
-
-        open spec fn inv_namespace(&self) -> int {
-            0
-        }
-
-        open spec fn other_namespace(&self) -> int {
-            1
         }
 
         open spec fn pre(self, op: Op) -> bool {
@@ -58,7 +49,7 @@ verus! {
             ensures
                 self.post(op, *e, out),
             opens_invariants
-                [ self.inv_namespace(), self.other_namespace() ];
+                { self.namespaces() };
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -67,20 +58,17 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                [ self.inv_namespace(), self.other_namespace() ];
+                { self.namespaces() };
     }
 
     pub trait MutLinearizer<Op: MutOperation> : Sized {
         type ApplyResult /* = () */;
 
-        /*open spec fn namespaces(self) -> Set<int> {
+        open spec fn namespaces(self) -> Set<int> {
             Set::empty()
-        }*/
-        open spec fn inv_namespace(&self) -> int {
-            0
         }
 
-        open spec fn other_namespace(&self) -> int {
+        open spec fn namespace(self) -> int {
             0
         }
 
@@ -100,7 +88,7 @@ verus! {
                 op.ensures(hint, *old(r), *r),
                 self.post(op, *e, out),
             opens_invariants
-                [ self.inv_namespace(), self.other_namespace() ];
+                [ self.namespace() ];
 
         proof fn peek(tracked &self, op: Op, tracked r: &Op::Resource)
             requires
@@ -109,6 +97,6 @@ verus! {
             ensures
                 op.peek_ensures(*r),
             opens_invariants
-                [ self.inv_namespace(), self.other_namespace() ];
+                [ self.namespace() ];
     }
 }

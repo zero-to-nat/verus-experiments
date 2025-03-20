@@ -1,14 +1,12 @@
 use builtin::*;
 use vstd::prelude::*;
 use vstd::rwlock::*;
-use vstd::invariant::*;
 use crate::frac::*;
 use crate::logatom::*;
 use crate::kvstore::*;
 use crate::bank::*;
 
 verus! {
-
 pub open spec fn val_or_none(m: Map::<u32, u32>, k: u32) -> Option::<u32>
 {
     if m.contains_key(k) { Some(m[k]) } else { None::<u32> }
@@ -71,65 +69,36 @@ pub fn diff_option(v1: Option::<u32>, v2: u32) -> (out: Option::<u32>)
     }
 }
 
-
-struct ShardedBankInvK {
-    bank_id: int,
-    left_client_id: int,
-    right_client_id: int,
-    left_locked_id: int,
-    right_locked_id: int
+struct ShardedBankLockedState {
+    left_client: Tracked<FractionalResource<Map::<u32, u32>, 2>>,
+    right_client: Tracked<FractionalResource<Map::<u32, u32>, 2>>,
+    bank_owned: Tracked<FractionalResource<Map::<u32, u32>, 2>>,
 }
 
-struct ShardedBankInvV {
-    bank_owned: FractionalResource<Map::<u32, u32>, 2>,
-    left_client: FractionalResource<Map::<u32, u32>, 2>,
-    right_client: FractionalResource<Map::<u32, u32>, 2>,
-    left_locked: FractionalResource<Map::<u32, u32>, 2>,
-    right_locked: FractionalResource<Map::<u32, u32>, 2>
+struct ShardedBankPred {
+    left_id: int,
+    right_id: int,
+    bank_id: int
 }
 
-struct ShardedBankInvPred {
-}
-
-impl InvariantPredicate<ShardedBankInvK, ShardedBankInvV> for ShardedBankInvPred {
-    closed spec fn inv(k: ShardedBankInvK, v: ShardedBankInvV) -> bool
-    {
-        &&& v.bank_owned.valid(k.bank_id, 1)
-        &&& v.left_client.valid(k.left_client_id, 1)
-        &&& v.right_client.valid(k.right_client_id, 1)
-        &&& v.left_locked.valid(k.left_locked_id, 1)
-        &&& v.right_locked.valid(k.right_locked_id, 1)
-        &&& v.left_client.val() == v.left_locked.val()
-        &&& v.right_client.val() == v.right_locked.val()
-        &&& forall |k: u32| #![trigger v.bank_owned.val().contains_key(k)] {
-            sum_option_spec(val_or_none(v.left_client.val(), k), val_or_none(v.right_client.val(), k), val_or_none(v.bank_owned.val(), k))
+impl RwLockPredicate<ShardedBankLockedState> for ShardedBankPred {
+    closed spec fn inv(self, v: ShardedBankLockedState) -> bool {
+        &&& v.left_client@.valid(self.left_id, 1)
+        &&& v.right_client@.valid(self.right_id, 1)
+        &&& v.bank_owned@.valid(self.bank_id, 1)
+        &&& forall |k: u32| #![trigger v.bank_owned@.val().contains_key(k)] {
+            sum_option_spec(val_or_none(v.left_client@.val(), k), val_or_none(v.right_client@.val(), k), val_or_none(v.bank_owned@.val(), k))
         }
     }
 }
 
-struct ShardedBankLockState {
-    locked_rsrc: Tracked<FractionalResource<Map::<u32, u32>, 2>>,
-}
-
-struct ShardedBankLockPred {
-    id: int,
-}
-
-impl RwLockPredicate<ShardedBankLockState> for ShardedBankLockPred {
-    closed spec fn inv(self, v: ShardedBankLockState) -> bool {
-        &&& v.locked_rsrc@.valid(self.id, 1)
-    }
-}
-
 struct ShardedBank<Store: KVStore<u32, u32>>  {
-    left_lock: RwLock<ShardedBankLockState, ShardedBankLockPred>,
-    right_lock: RwLock<ShardedBankLockState, ShardedBankLockPred>,
-    invariant: Tracked<AtomicInvariant<ShardedBankInvK, ShardedBankInvV, ShardedBankInvPred>>,
-    left_store: Store,
-    right_store: Store
+    pub locked_state: RwLock<ShardedBankLockedState, ShardedBankPred>,
+    pub left_store: Store,
+    pub right_store: Store
 }
 
-struct KVStoreExclusiveGetLinearizer {
+pub struct KVStoreExclusiveGetLinearizer {
     pub client: FractionalResource<Map::<u32, u32>, 2>,
 }
 
@@ -157,7 +126,7 @@ impl ReadLinearizer<KVStoreGetOperation<u32, u32>> for KVStoreExclusiveGetLinear
     proof fn peek(tracked &self, op: KVStoreGetOperation<u32, u32>, tracked r: &<KVStoreGetOperation<u32, u32> as ReadOperation>::Resource) {}
 }
 
-struct KVStoreExclusivePutLinearizer {
+pub struct KVStoreExclusivePutLinearizer {
     pub client: FractionalResource<Map::<u32, u32>, 2>,
 }
 
@@ -185,20 +154,18 @@ impl MutLinearizer<KVStorePutOperation<u32, u32>> for KVStoreExclusivePutLineari
 
 impl<Store: KVStore<u32, u32>> Bank for ShardedBank<Store> {
     closed spec fn id(&self) -> int {
-        self.invariant@.constant().bank_id
+        self.locked_state.pred().bank_id
     }
 
     closed spec fn inv_namespace(self) -> int {
-        12345
+        0
     }
 
     closed spec fn inv(&self) -> bool {
         &&& self.left_store.inv()
         &&& self.right_store.inv()
-        &&& self.left_store.id() == self.invariant@.constant().left_client_id
-        &&& self.right_store.id() == self.invariant@.constant().right_client_id
-        &&& self.left_lock.pred().id == self.invariant@.constant().left_locked_id
-        &&& self.right_lock.pred().id == self.invariant@.constant().right_locked_id
+        &&& self.left_store.id() == self.locked_state.pred().left_id
+        &&& self.right_store.id() == self.locked_state.pred().right_id
     }
 
     open spec fn new_pre() -> bool {
@@ -211,38 +178,17 @@ impl<Store: KVStore<u32, u32>> Bank for ShardedBank<Store> {
         let (left_store, left_client) = Store::new();
         let (right_store, right_client) = Store::new();
         let tracked(my_frac, client_frac) = FractionalResource::new(Map::<u32, u32>::empty()).split(1);
-        let tracked(left_locked_my, left_locked_inv) = FractionalResource::new(Map::<u32, u32>::empty()).split(1);
-        let tracked(right_locked_my, right_locked_inv) = FractionalResource::new(Map::<u32, u32>::empty()).split(1);
 
-        let left_lock_state = ShardedBankLockState { locked_rsrc: Tracked(left_locked_my) };
-        let ghost left_lock_pred = ShardedBankLockPred { id: left_locked_my.id() };
-        let left_lock = RwLock::new(left_lock_state, Ghost(left_lock_pred));
-        let right_lock_state = ShardedBankLockState { locked_rsrc: Tracked(right_locked_my) };
-        let ghost right_lock_pred = ShardedBankLockPred { id: right_locked_my.id() };
-        let right_lock = RwLock::new(right_lock_state, Ghost(right_lock_pred));
+        let state = ShardedBankLockedState { left_client, right_client, bank_owned: Tracked(my_frac) };
 
-        let ghost inv_k = ShardedBankInvK{ 
-            bank_id: my_frac.id(), 
-            left_client_id: left_client@.id(), 
-            right_client_id: right_client@.id(), 
-            left_locked_id: left_locked_inv.id(),
-            right_locked_id: right_locked_inv.id()
-        };
-        let tracked inv_v = ShardedBankInvV {
-            bank_owned: my_frac,
-            left_client: left_client.get(),
-            right_client: right_client.get(),
-            left_locked: left_locked_inv,
-            right_locked: right_locked_inv
-        };
-        let tracked inv = AtomicInvariant::<_,_,ShardedBankInvPred>::new(inv_k, inv_v, 12345);
+        let ghost pred = ShardedBankPred { left_id: left_client@.id(), right_id: right_client@.id(), bank_id: my_frac.id() };
+        let locked_state = RwLock::new(state, Ghost(pred));
 
-        (ShardedBank { left_lock, right_lock, invariant: Tracked(inv), left_store, right_store }, Tracked(client_frac))
+        (ShardedBank{locked_state, left_store, right_store}, Tracked(client_frac))
     }
 
-    /*
     fn deposit<Lin: MutLinearizer<BankDepositOperation>>(&self, a: u32, v: u32, lin: Tracked<Lin>) 
-        -> (out: (u32, Tracked<Lin::ApplyResult>))
+        -> (out: Tracked<Lin::ApplyResult>)
     {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
 
@@ -261,15 +207,14 @@ impl<Store: KVStore<u32, u32>> Bank for ShardedBank<Store> {
         let left_client = self.left_store.put::<KVStoreExclusivePutLinearizer>(a, new_left_balance.unwrap(), put_lin);
         state.left_client = left_client;
 
-        let new_balance = sum_option(new_left_balance, old_right).unwrap();
-        let tracked ar = lin.get().apply(deposit_op(self.id(), a, v), (), state.bank_owned.borrow_mut(), &new_balance);
+        let tracked ar = lin.get().apply(deposit_op(self.id(), a, v), (), state.bank_owned.borrow_mut(), &());
 
         lock_handle.release_write(state);
-        (new_balance, Tracked(ar))
+        Tracked(ar)
     }
 
     fn withdraw<Lin: MutLinearizer<BankWithdrawOperation>>(&self, a: u32, v: u32, lin: Tracked<Lin>) 
-        -> (out: (u32, Tracked<Lin::ApplyResult>))
+        -> (out: Tracked<Lin::ApplyResult>)
     {
         let (mut state, lock_handle) = self.locked_state.acquire_write();
 
@@ -303,12 +248,11 @@ impl<Store: KVStore<u32, u32>> Bank for ShardedBank<Store> {
             state.right_client = right_client;
         }
 
-        let new_balance = sum_option(new_left_balance, new_right_balance).unwrap();
-        let tracked ar = lin.get().apply(withdraw_op(self.id(), a, v), (), state.bank_owned.borrow_mut(), &new_balance);
+        let tracked ar = lin.get().apply(withdraw_op(self.id(), a, v), (), state.bank_owned.borrow_mut(), &());
 
         lock_handle.release_write(state);
-        (new_balance, Tracked(ar))
+        Tracked(ar)
     }
-    */
+
 }
 }
